@@ -55,6 +55,7 @@ public:
 
 class SubCfgFormationPass : public llvm::PassInfoMixin<SubCfgFormationPass> {
   bool IsSscp_;
+
 public:
   explicit SubCfgFormationPass(bool IsSscp) : IsSscp_(IsSscp) {}
 

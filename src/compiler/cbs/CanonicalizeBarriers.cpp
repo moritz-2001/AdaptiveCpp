@@ -47,7 +47,7 @@ bool canonicalizeExitBarriers(llvm::Function &F, SplitterAnnotationInfo &SAA) {
     auto *T = BB->getTerminator();
 
     // The function exits should have barriers.
-    if (!utils::hasOnlyBarrier(BB, SAA)) {
+    if (!utils::hasOnlyBarrier(BB, SAA) && !utils::hasOnlySubBarrier(BB, SAA)) {
       /* In case the bb is already terminated with a barrier,
          split before the barrier so we don'T create an empty
          parallel region.
@@ -58,7 +58,7 @@ bool canonicalizeExitBarriers(llvm::Function &F, SplitterAnnotationInfo &SAA) {
          b) there are no empty parallel regions (which would be formed
          between the explicit barrier and the added one). */
       llvm::BasicBlock *Exit;
-      if (utils::endsWithBarrier(BB, SAA))
+      if (utils::endsWithBarrier(BB, SAA) || utils::endsWithSubBarrier(BB, SAA))
         Exit = SplitBlock(BB, T->getPrevNode());
       else
         Exit = SplitBlock(BB, T);
@@ -79,12 +79,12 @@ bool pruneEmptyRegions(llvm::Function &F, const SplitterAnnotationInfo &SAA) {
     EmptyRegionDeleted = false;
     for (auto &BB : F) {
       auto *T = BB.getTerminator();
-      if (!utils::hasOnlyBarrier(&BB, SAA) || T->getNumSuccessors() != 1)
+      if (!(utils::hasOnlyBarrier(&BB, SAA) || utils::hasOnlySubBarrier(&BB, SAA)) || T->getNumSuccessors() != 1)
         continue;
 
       llvm::BasicBlock *Successor = T->getSuccessor(0);
 
-      if (utils::hasOnlyBarrier(Successor, SAA) && Successor->getSinglePredecessor() == &BB) {
+      if ((utils::hasOnlyBarrier(Successor, SAA) || utils::hasOnlySubBarrier(Successor, SAA)) && Successor->getSinglePredecessor() == &BB) {
         HIPSYCL_DEBUG_INFO << "Prune BasicBlock: " << BB.getName() << "\n";
         BB.replaceAllUsesWith(Successor);
         BB.eraseFromParent();
@@ -99,7 +99,7 @@ bool pruneEmptyRegions(llvm::Function &F, const SplitterAnnotationInfo &SAA) {
 
 bool canonicalizeEntry(llvm::BasicBlock *Entry, SplitterAnnotationInfo &SAA) {
   bool Changed = false;
-  if (!utils::hasOnlyBarrier(Entry, SAA)) {
+  if (!utils::hasOnlyBarrier(Entry, SAA) && !utils::hasOnlySubBarrier(Entry, SAA)) {
     llvm::BasicBlock *EffectiveEntry = SplitBlock(Entry, &(Entry->front()));
 
     EffectiveEntry->takeName(Entry);
@@ -126,14 +126,16 @@ bool canonicalizeBarriers(llvm::Function &F, SplitterAnnotationInfo &SAA) {
 
   for (auto &BB : F)
     for (auto &I : BB)
-      if (utils::isBarrier(&I, SAA))
+      if (utils::isBarrier(&I, SAA) || utils::isSubBarrier(&I, SAA))
         Barriers.insert(&I);
 
   // Finally add all the split points, now that we are done with the
   // iterators.
   for (auto *Barrier : Barriers) {
     llvm::BasicBlock *BB = Barrier->getParent();
-    HIPSYCL_DEBUG_INFO << "[Canonicalize] Barrier in: " << BB->getName() << "\n";
+    if (utils::isSubBarrier(Barrier, SAA)) {
+      HIPSYCL_DEBUG_INFO << "[Canonicalize] Subbarrier in: " << BB->getName() << "\n";
+    }
 
     // Split post barrier first cause it does not make the barrier
     // to belong to another basic block.
@@ -141,7 +143,7 @@ bool canonicalizeBarriers(llvm::Function &F, SplitterAnnotationInfo &SAA) {
 
     // looses conditional branches if in the same BB as a barrier, must split if multiple successors
     if (T->getPrevNode() != Barrier || T->getNumSuccessors() > 1) {
-      HIPSYCL_DEBUG_INFO << "[Canonicalize] Splitting after barrier in: " << BB->getName() << "\n";
+      //HIPSYCL_DEBUG_INFO << "[Canonicalize] Splitting after barrier in: " << BB->getName() << "\n";
       llvm::BasicBlock *NewB = SplitBlock(BB, Barrier->getNextNode());
       NewB->setName(BB->getName() + ".postbarrier");
       Changed = true;
@@ -161,7 +163,7 @@ bool canonicalizeBarriers(llvm::Function &F, SplitterAnnotationInfo &SAA) {
     if (BB == Entry && (&BB->front() == Barrier))
       continue;
 
-    HIPSYCL_DEBUG_INFO << "[Canonicalize] Splitting before barrier in: " << BB->getName() << "\n";
+    //HIPSYCL_DEBUG_INFO << "[Canonicalize] Splitting before barrier in: " << BB->getName() << "\n";
 
     llvm::BasicBlock *NewB = SplitBlock(BB, Barrier);
     NewB->takeName(BB);
@@ -186,7 +188,7 @@ void CanonicalizeBarriersPassLegacy::getAnalysisUsage(llvm::AnalysisUsage &AU) c
 
 bool CanonicalizeBarriersPassLegacy::runOnFunction(llvm::Function &F) {
   auto &SAA = getAnalysis<SplitterAnnotationAnalysisLegacy>().getAnnotationInfo();
-  if (!SAA.isKernelFunc(&F) || !utils::hasBarriers(F, SAA))
+  if (!SAA.isKernelFunc(&F) || !(utils::hasBarriers(F, SAA) || utils::hasSubBarriers(F, SAA)))
     return false;
   return canonicalizeBarriers(F, SAA);
 }
@@ -195,7 +197,7 @@ llvm::PreservedAnalyses CanonicalizeBarriersPass::run(llvm::Function &F,
                                                       llvm::FunctionAnalysisManager &AM) {
   auto &MAM = AM.getResult<llvm::ModuleAnalysisManagerFunctionProxy>(F);
   auto *SAA = MAM.getCachedResult<hipsycl::compiler::SplitterAnnotationAnalysis>(*F.getParent());
-  if (!SAA || !SAA->isKernelFunc(&F) || !utils::hasBarriers(F, *SAA))
+  if (!SAA || !SAA->isKernelFunc(&F) || !(utils::hasBarriers(F, *SAA) || utils::hasSubBarriers(F, *SAA)))
     return llvm::PreservedAnalyses::all();
 
   if (!canonicalizeBarriers(F, *SAA))

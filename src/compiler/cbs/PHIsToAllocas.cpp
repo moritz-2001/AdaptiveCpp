@@ -107,7 +107,7 @@ void PHIsToAllocasPassLegacy::getAnalysisUsage(llvm::AnalysisUsage &AU) const {
 
 bool PHIsToAllocasPassLegacy::runOnFunction(llvm::Function &F) {
   const auto &SAA = getAnalysis<SplitterAnnotationAnalysisLegacy>().getAnnotationInfo();
-  if (!SAA.isKernelFunc(&F) || !utils::hasBarriers(F, SAA))
+  if (!SAA.isKernelFunc(&F) || !(utils::hasBarriers(F, SAA) || utils::hasSubBarriers(F, SAA)))
     return false;
 
   return demotePHIsToAllocas(F);
@@ -118,7 +118,7 @@ llvm::PreservedAnalyses PHIsToAllocasPass::run(llvm::Function &F,
   auto &MAM = AM.getResult<llvm::ModuleAnalysisManagerFunctionProxy>(F);
   const auto *SAA =
       MAM.getCachedResult<hipsycl::compiler::SplitterAnnotationAnalysis>(*F.getParent());
-  if (!SAA || !SAA->isKernelFunc(&F) || !utils::hasBarriers(F, *SAA)) {
+  if (!SAA || !SAA->isKernelFunc(&F) || !(utils::hasBarriers(F, *SAA) || utils::hasSubBarriers(F, *SAA))) {
     return llvm::PreservedAnalyses::all();
   }
 

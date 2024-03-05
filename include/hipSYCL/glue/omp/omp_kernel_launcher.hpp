@@ -153,30 +153,33 @@ void reducible_parallel_invocation(Function kernel,
 extern "C" size_t __hipsycl_cbs_local_id_x;
 extern "C" size_t __hipsycl_cbs_local_id_y;
 extern "C" size_t __hipsycl_cbs_local_id_z;
+#ifdef HIERACHICAL
+extern "C" size_t __hipsycl_cbs_local_id_subgroup;
+#endif
 
 template <int Dim, class Function, class ...Reducers>
 HIPSYCL_LOOP_SPLIT_ND_KERNEL __attribute__((noinline))
 inline void iterate_nd_range_omp(Function f, const sycl::id<Dim> &&group_id, const sycl::range<Dim> num_groups,
   HIPSYCL_LOOP_SPLIT_ND_KERNEL_LOCAL_SIZE_ARG const sycl::range<Dim> local_size, const sycl::id<Dim> offset,
-  size_t num_local_mem_bytes, void* group_shared_memory_ptr,
+  size_t num_local_mem_bytes, void* group_shared_memory_ptr, void* sub_group_shared_memory_ptr,
   std::function<void()> &barrier_impl,
   Reducers& ... reducers) noexcept {
   if constexpr (Dim == 1) {
     sycl::id<Dim> local_id{__hipsycl_cbs_local_id_x};
     sycl::nd_item<Dim> this_item{&offset,    group_id,   local_id,
-      local_size, num_groups, &barrier_impl, group_shared_memory_ptr};
+      local_size, num_groups, &barrier_impl, group_shared_memory_ptr, sub_group_shared_memory_ptr, __hipsycl_cbs_local_id_subgroup};
     f(this_item, reducers...);
   } else if constexpr (Dim == 2) {
     sycl::id<Dim> local_id{__hipsycl_cbs_local_id_x, __hipsycl_cbs_local_id_y};
     sycl::nd_item<Dim> this_item{&offset, group_id,
       local_id, local_size, num_groups,
-      &barrier_impl, group_shared_memory_ptr};
+      &barrier_impl, group_shared_memory_ptr, sub_group_shared_memory_ptr, __hipsycl_cbs_local_id_subgroup};
     f(this_item, reducers...);
   } else if constexpr (Dim == 3) {
     sycl::id<Dim> local_id{__hipsycl_cbs_local_id_x, __hipsycl_cbs_local_id_y, __hipsycl_cbs_local_id_z};
     sycl::nd_item<Dim> this_item{&offset,    group_id,
       local_id,   local_size,
-      num_groups, &barrier_impl, group_shared_memory_ptr};
+      num_groups, &barrier_impl, group_shared_memory_ptr, sub_group_shared_memory_ptr, __hipsycl_cbs_local_id_subgroup};
     f(this_item, reducers...);
   }
 }
@@ -240,6 +243,7 @@ inline void parallel_for_ndrange_kernel(
 
     // 128 kiB as local memory for group algorithms
     std::aligned_storage_t<128*1024, sizeof(double) * 16> group_shared_memory_ptr{};
+    std::aligned_storage_t<128*32, sizeof(double) * 16> sub_group_shared_memory_ptr{};
 #ifdef __HIPSYCL_USE_ACCELERATED_CPU__
     std::function<void()> barrier_impl = [] () noexcept {
       assert(false && "splitting seems to have failed");
@@ -248,7 +252,7 @@ inline void parallel_for_ndrange_kernel(
 
     host::iterate_range_omp_for(num_groups, [&](sycl::id<Dim> &&group_id) {
       iterate_nd_range_omp(f, std::move(group_id), num_groups, local_size, offset,
-        num_local_mem_bytes, &group_shared_memory_ptr, barrier_impl, reducers...);
+        num_local_mem_bytes, &group_shared_memory_ptr, &sub_group_shared_memory_ptr, barrier_impl, reducers...);
     });
 #elif defined(HIPSYCL_HAS_FIBERS)
     host::static_range_decomposition<Dim> group_decomposition{

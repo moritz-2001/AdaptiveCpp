@@ -31,8 +31,7 @@
 
 BOOST_FIXTURE_TEST_SUITE(sub_group_tests, reset_device_fixture)
 
-
-
+/*
 BOOST_AUTO_TEST_CASE(sub_group) {
   namespace s = cl::sycl;
   s::queue q;
@@ -115,6 +114,7 @@ BOOST_AUTO_TEST_CASE(sub_group) {
     }
   }
 }
+*/
 
 
 

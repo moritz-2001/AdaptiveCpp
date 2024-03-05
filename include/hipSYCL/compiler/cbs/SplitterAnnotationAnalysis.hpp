@@ -40,9 +40,11 @@ namespace compiler {
 // collects all functions annotated as nd-range kernels or barriers.
 class SplitterAnnotationInfo {
   static constexpr const char *SplitterAnnotation = "hipsycl_barrier";
+  static constexpr const char *SubSplitterAnnotation = "hipsycl_sub_barrier";
   static constexpr const char *KernelAnnotation = "hipsycl_nd_kernel";
   static constexpr const char *SSCPKernelMD = "kernel";
   llvm::SmallPtrSet<llvm::Function *, 4> SplitterFuncs;
+  llvm::SmallPtrSet<llvm::Function *, 4> SubSplitterFuncs;
   llvm::SmallPtrSet<llvm::Function *, 8> NDKernels;
 
   bool analyzeModule(llvm::Module &M);
@@ -50,10 +52,14 @@ class SplitterAnnotationInfo {
 public:
   explicit SplitterAnnotationInfo(llvm::Module &Module);
   inline bool isSplitterFunc(const llvm::Function *F) const { return SplitterFuncs.contains(F); }
+  inline bool isSubSplitterFunc(const llvm::Function *F) const { return SubSplitterFuncs.contains(F); }
   inline bool isKernelFunc(const llvm::Function *F) const { return NDKernels.contains(F); }
 
   inline void removeSplitter(llvm::Function *F) { SplitterFuncs.erase(F); }
   inline void addSplitter(llvm::Function *F) { SplitterFuncs.insert(F); }
+
+  inline void removeSubSplitter(llvm::Function *F) { SubSplitterFuncs.erase(F); }
+  inline void addSubSplitter(llvm::Function *F) { SubSplitterFuncs.insert(F); }
 
   void print(llvm::raw_ostream &Stream);
 

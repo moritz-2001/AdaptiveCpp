@@ -48,18 +48,29 @@ bool inlineCallsInBasicBlock(llvm::BasicBlock &BB,
     LastChanged = false;
     for (auto &I : BB) {
       if (auto *CallI = llvm::dyn_cast<llvm::CallBase>(&I)) {
-        if (CallI->getCalledFunction()) {
-          if (SplitterCallers.find(CallI->getCalledFunction()) != SplitterCallers.end() &&
-              !SAA.isSplitterFunc(CallI->getCalledFunction())) {
+        if (const auto *CalledFunction = CallI->getCalledFunction()) {
+          if (SplitterCallers.find(CalledFunction) != SplitterCallers.end() &&
+              !SAA.isSplitterFunc(CalledFunction) &&
+              !SAA.isSubSplitterFunc(CalledFunction)
+          ) {
             LastChanged =
                 hipsycl::compiler::utils::checkedInlineFunction(CallI, "[LoopSplitterInlining]");
             if (LastChanged)
               break;
-          } else if (SAA.isSplitterFunc(CallI->getCalledFunction()) &&
-                     CallI->getCalledFunction()->getName() != BarrierIntrinsicName) {
+
+          } else if (SAA.isSplitterFunc(CalledFunction) &&
+                     CalledFunction->getName() != BarrierIntrinsicName) {
             HIPSYCL_DEBUG_INFO << "[LoopSplitterInlining] Replace barrier with intrinsic: "
-                               << CallI->getCalledFunction()->getName() << "\n";
+                               << CalledFunction->getName() << "\n";
             hipsycl::compiler::utils::createBarrier(CallI, SAA);
+            CallI->eraseFromParent();
+            LastChanged = true;
+            break;
+          } else if (SAA.isSubSplitterFunc(CalledFunction) && CalledFunction->getName() !=
+                     SubBarrierIntrinsicName) {
+            HIPSYCL_DEBUG_INFO << "[LoopSplitterInlining] Replace sub barrier with intrinsic: "
+                               << CalledFunction->getName() << "\n";
+            hipsycl::compiler::utils::createSubBarrier(CallI, SAA);
             CallI->eraseFromParent();
             LastChanged = true;
             break;
@@ -123,7 +134,7 @@ bool fillTransitiveSplitterCallers(llvm::Function &F,
                                    const hipsycl::compiler::SplitterAnnotationInfo &SAA,
                                    llvm::SmallPtrSet<llvm::Function *, 8> &FuncsWSplitter,
                                    bool InIntrinsic) {
-  if (SAA.isSplitterFunc(&F)) {
+  if (SAA.isSplitterFunc(&F) || SAA.isSubSplitterFunc(&F)) {
     FuncsWSplitter.insert(&F);
     return true;
   } else if (FuncsWSplitter.find(&F) != FuncsWSplitter.end())
@@ -135,6 +146,10 @@ bool fillTransitiveSplitterCallers(llvm::Function &F,
 
   llvm::SmallVector<llvm::BasicBlock *, 8> Blocks;
   std::transform(F.begin(), F.end(), std::back_inserter(Blocks), [](auto &BB) { return &BB; });
+
+  if (F.getName().startswith("__hipsycl_sscp")) {
+    HIPSYCL_DEBUG_WARNING << "[LoopSplitterInlining] " << F.getName() << " B!\n";
+  }
 
   if (fillTransitiveSplitterCallers(Blocks, SAA, FuncsWSplitter,
                                     InIntrinsic || F.getName().startswith("__hipsycl_sscp"))) {

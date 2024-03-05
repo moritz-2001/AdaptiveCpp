@@ -40,12 +40,103 @@
 #include "sscp/builtins/subgroup.hpp"
 #endif
 
+#define HIERACHICAL
+
 namespace hipsycl {
 namespace sycl {
 
 
-class sub_group
-{
+#ifdef HIERACHICAL
+
+class sub_group {
+public:
+  using id_type = sycl::id<1>;
+  using range_type = sycl::range<1>;
+  using linear_id_type = uint32_t;
+  using linear_range_type = uint32_t;
+
+  static constexpr int dimensions = 1;
+  static constexpr memory_scope fence_scope = memory_scope::sub_group;
+
+  explicit sub_group(size_t group_id, size_t num_subgroups, void* local_memory, size_t subgroup_id) :
+  _group_id(group_id), _num_subgroups(num_subgroups), _local_memory(local_memory), _subgroup_id(subgroup_id) {}
+
+  // Only exists to get code compiling
+  explicit sub_group() : _group_id(0), _num_subgroups(0), _local_memory(nullptr) {
+    assert(false);
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  id_type get_local_id() const {
+    return id_type{get_local_linear_id()};
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  linear_id_type get_local_linear_id() const {
+    return _subgroup_id;
+  }
+
+  // always returns the maximum sub_group size
+  HIPSYCL_KERNEL_TARGET
+  range_type get_local_range() const {
+    return range_type{get_local_linear_range()};
+  }
+
+  // always returns the maximum sub_group size
+  HIPSYCL_KERNEL_TARGET
+  linear_range_type get_local_linear_range() const {
+    return 32; // TODO wrong for incomplete subgroups
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  range_type get_max_local_range() const {
+    return range_type{32};
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  id_type get_group_id() const {
+    return id_type{get_group_linear_id()};
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  linear_id_type get_group_linear_id() const {
+    return _group_id;
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  linear_range_type get_group_linear_range() const {
+    return _num_subgroups;
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  range_type get_group_range() const {
+    return range_type{get_group_linear_range()};
+  }
+
+  [[deprecated]]
+  HIPSYCL_KERNEL_TARGET
+  range_type get_max_group_range() const {
+    return get_group_range();
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  bool leader() const {
+    return get_local_linear_id() == 0;
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  void *get_local_memory_ptr() const {
+    return _local_memory;
+  }
+private:
+  size_t _group_id;
+  size_t _num_subgroups;
+  void* _local_memory;
+  size_t _subgroup_id;
+
+};
+#else
+class sub_group {
 public:
   using id_type = sycl::id<1>;
   using range_type = sycl::range<1>;
@@ -64,7 +155,7 @@ public:
   HIPSYCL_KERNEL_TARGET
   linear_id_type get_local_linear_id() const {
     __hipsycl_backend_switch(
-        return 0, 
+        return 0,
         return __hipsycl_sscp_get_subgroup_local_id(),
         return local_tid() & get_warp_mask(),
         return local_tid() & get_warp_mask(),
@@ -81,7 +172,7 @@ public:
   HIPSYCL_KERNEL_TARGET
   linear_range_type get_local_linear_range() const {
     __hipsycl_backend_switch(
-        return 1, 
+        return 32, // TODO wrong for incomplete subgroups
         return __hipsycl_sscp_get_subgroup_size(),
         // TODO This is not actually correct for incomplete subgroups
         return __hipsycl_warp_size,
@@ -92,7 +183,7 @@ public:
   HIPSYCL_KERNEL_TARGET
   range_type get_max_local_range() const {
     __hipsycl_backend_switch(
-        return range_type{1},
+        return range_type{32},
         return range_type{__hipsycl_sscp_get_subgroup_max_size()},
         return range_type{__hipsycl_warp_size},
         return range_type{__hipsycl_warp_size},
@@ -107,7 +198,7 @@ public:
   HIPSYCL_KERNEL_TARGET
   linear_id_type get_group_linear_id() const {
     __hipsycl_backend_switch(
-        return 0, // TODO This is probably incorrect
+        return 0, // TODO is incorrect
         return __hipsycl_sscp_get_subgroup_id(),
         return local_tid() >> (__ffs(__hipsycl_warp_size) - 1),
         return local_tid() >> (__ffs(__hipsycl_warp_size) - 1),
@@ -139,24 +230,32 @@ public:
   bool leader() const {
     return get_local_linear_id() == 0;
   }
+
+#if !HIPSYCL_LIBKERNEL_IS_DEVICE_PASS
+  HIPSYCL_KERNEL_TARGET
+  void *get_local_memory_ptr() const {
+    return _local_memory_ptr;
+  }
+#endif
+
 private:
   int hiplike_num_subgroups() const {
     __hipsycl_if_target_hiplike(
         int local_range =
-            __hipsycl_lsize_x * __hipsycl_lsize_y * __hipsycl_lsize_z;
+        __hipsycl_lsize_x * __hipsycl_lsize_y * __hipsycl_lsize_z;
         return (local_range + __hipsycl_warp_size - 1) / __hipsycl_warp_size;
-    );
+        );
     return 0;
   }
 
   HIPSYCL_KERNEL_TARGET
   int local_tid() const {
     __hipsycl_if_target_device(
-      int tid = __hipsycl_lid_x 
-              + __hipsycl_lid_y * __hipsycl_lsize_x 
-              + __hipsycl_lid_z * __hipsycl_lsize_x * __hipsycl_lsize_y;
-      return tid;
-    );
+        int tid = __hipsycl_lid_x
+        + __hipsycl_lid_y * __hipsycl_lsize_x
+        + __hipsycl_lid_z * __hipsycl_lsize_x * __hipsycl_lsize_y;
+        return tid;
+        );
     return 0;
   }
 
@@ -164,11 +263,13 @@ private:
   int get_warp_mask() const {
     // Assumes that __hipsycl_warp_size is a power of two
     __hipsycl_if_target_hiplike(
-      return __hipsycl_warp_size - 1;
-    );
+        return __hipsycl_warp_size - 1;
+        );
     return 0;
   }
+
 };
+#endif
 
 }
 }

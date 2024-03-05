@@ -72,7 +72,7 @@ bool removeBarrierCalls(llvm::Function &F, SplitterAnnotationInfo &SAA) {
 
   for (auto &BB : F) {
     for (auto &I : BB) {
-      if (utils::isBarrier(&I, SAA)) {
+      if (utils::isBarrier(&I, SAA) || utils::isSubBarrier(&I, SAA)) {
         BarriersToRemove.insert(&I);
       }
     }
@@ -94,12 +94,21 @@ bool removeBarrierCalls(llvm::Function &F, SplitterAnnotationInfo &SAA) {
                          << BarrierIntrinsicName << "\n";
     }
   }
+  if (auto *B = M->getFunction(SubBarrierIntrinsicName)) {
+    if (B->getNumUses() == 0) {
+      B->eraseFromParent();
+      SAA.removeSplitter(B);
+      HIPSYCL_DEBUG_INFO << "[RemoveBarrierCalls] Clean-up helper sub-barrier: "
+                         << SubBarrierIntrinsicName << "\n";
+    }
+  }
 
   bool Changed = !BarriersToRemove.empty();
 
   Changed |= deleteGlobalVariable(M, LocalIdGlobalNameX);
   Changed |= deleteGlobalVariable(M, LocalIdGlobalNameY);
   Changed |= deleteGlobalVariable(M, LocalIdGlobalNameZ);
+  Changed |= deleteGlobalVariable(M, SgIdGlobalName);
 
   return Changed;
 }
@@ -128,6 +137,8 @@ llvm::PreservedAnalyses RemoveBarrierCallsPass::run(llvm::Function &F,
 
   if (!removeBarrierCalls(F, *SAA))
     return llvm::PreservedAnalyses::all();
+
+  HIPSYCL_DEBUG_EXECUTE_VERBOSE(F.viewCFG();)
 
   llvm::PreservedAnalyses PA;
   PA.preserve<SplitterAnnotationAnalysis>();

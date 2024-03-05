@@ -57,11 +57,14 @@ __hipsycl_group_barrier(group<Dim> g,
 }
 
 HIPSYCL_KERNEL_TARGET
+[[clang::annotate(
+  "hipsycl_sub_barrier")]] __attribute__((noinline))
 inline void
 __hipsycl_group_barrier(sub_group g,
                         memory_scope fence_scope = sub_group::fence_scope) {
   // doesn't need sync
 }
+
 
 namespace detail {
 // reduce implementation
@@ -89,6 +92,8 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x,
 
   return tmp;
 }
+
+
 
 } // namespace detail
 
@@ -123,15 +128,38 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_broadcast(
 template<typename T>
 HIPSYCL_KERNEL_TARGET
 T __hipsycl_group_broadcast(sub_group g, T x,
-                  typename sub_group::linear_id_type local_linear_id = 0) {
-  return x;
+                  typename sub_group::linear_id_type local_id) {
+  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+  const size_t lid = g.get_local_linear_id();
+  if (lid == local_id) {
+    scratch[0] = x;
+  }
+
+  __hipsycl_group_barrier(g);
+  T tmp = scratch[0];
+  __hipsycl_group_barrier(g);
+
+  return tmp;
 }
 
-template<typename T>
-HIPSYCL_KERNEL_TARGET
-T __hipsycl_group_broadcast(sub_group g, T x,
-                  typename sub_group::id_type local_id) {
-  return x;
+template <typename T>
+HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_left(
+    sub_group g, T x, typename sub_group::linear_id_type delta = 1) {
+  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+
+   auto lid = g.get_local_linear_id();
+   auto target_lid = lid + delta;
+   scratch[lid] = x;
+
+   __hipsycl_group_barrier(g);
+
+   if (target_lid > g.get_local_range().size())
+     target_lid = 0;
+   x = scratch[target_lid];
+
+   __hipsycl_group_barrier(g);
+
+   return x;
 }
 
 // any_of
@@ -365,7 +393,16 @@ T __hipsycl_reduce_over_group(group<Dim> g, T x, BinaryOperation binary_op) {
 template<typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET
 T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
-  return x;
+  const size_t lid = g.get_local_linear_id();
+  const size_t lrange = g.get_local_linear_range();
+
+  auto local_x = x;
+
+  for (size_t i = lrange / 2; i > 0; i /= 2) {
+    auto other_x = __hipsycl_shift_group_left(g, local_x, i);
+    local_x = binary_op(local_x, other_x);
+  }
+  return __hipsycl_group_broadcast(g, local_x, 0);
 }
 
 // exclusive_scan
@@ -562,11 +599,7 @@ T __hipsycl_shift_group_left(
   return x;
 }
 
-template <typename T>
-HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_left(
-    sub_group g, T x, typename sub_group::linear_id_type delta = 1) {
-  return x;
-}
+
 
 // shift_right
 template <int Dim, typename T>

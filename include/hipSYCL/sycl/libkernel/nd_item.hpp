@@ -61,6 +61,8 @@ struct nd_item
 {
   /* -- common interface members -- */
   static constexpr int dimensions = Dimensions;
+  // TODO
+  static constexpr uint32_t SGSize = 32;
 
   HIPSYCL_KERNEL_TARGET
   id<Dimensions> get_global_id() const
@@ -179,7 +181,9 @@ struct nd_item
         _num_groups,
         static_cast<detail::host_barrier_type *>(_group_barrier),
         get_local_id(),
-        _local_memory_ptr};
+        _local_memory_ptr,
+        _sub_local_memory_ptr,
+    };
 #endif
   }
 
@@ -210,7 +214,16 @@ struct nd_item
   HIPSYCL_KERNEL_TARGET
   sub_group get_sub_group() const
   {
-    return sub_group{};
+#ifdef HIERACHICAL
+    return sub_group{
+        static_cast<uint32_t>(get_local_linear_id()) / SGSize,
+        (get_local_range().size() + (SGSize-1)) / SGSize,
+        _sub_local_memory_ptr,
+      _subgroup_id
+    };
+#else
+   return sub_group{};
+#endif
   }
 
   HIPSYCL_KERNEL_TARGET
@@ -379,14 +392,19 @@ struct nd_item
           id<Dimensions> group_id, id<Dimensions> local_id, 
           range<Dimensions> local_range, range<Dimensions> num_groups,
           detail::host_barrier_type* host_group_barrier = nullptr,
-          void* local_memory_ptr = nullptr)
-    : _offset{offset}, 
-      _group_id{group_id}, 
-      _local_id{local_id}, 
+          void* local_memory_ptr = nullptr,
+          void* sub_local_memory_ptr = nullptr,
+          size_t subgroup_id = 0
+          )
+    : _offset{offset},
+      _group_id{group_id},
+      _local_id{local_id},
       _local_range{local_range},
       _num_groups{num_groups},
       _global_id{group_id * local_range + local_id},
-      _local_memory_ptr(local_memory_ptr)
+      _local_memory_ptr(local_memory_ptr),
+      _sub_local_memory_ptr(sub_local_memory_ptr),
+      _subgroup_id(subgroup_id)
   {
     __hipsycl_if_target_host(
       _group_barrier = static_cast<void*>(host_group_barrier);
@@ -404,6 +422,8 @@ private:
   const range<Dimensions> _num_groups;
   const id<Dimensions> _global_id;
   void *_local_memory_ptr;
+  void *_sub_local_memory_ptr;
+  size_t _subgroup_id;
 #endif
 
 #ifndef SYCL_DEVICE_ONLY

@@ -117,6 +117,7 @@ private:
   const void* _group_barrier;
   const id_type _local_id;
   void *_local_memory_ptr;
+  void *_sub_group_local_memory_ptr;
 public:
 
   group(id<Dimensions> group_id,
@@ -124,13 +125,16 @@ public:
         range<Dimensions> num_groups,
         host_barrier_type* group_barrier = nullptr,
         id_type local_id = {},
-        void *local_memory_ptr = nullptr)
+        void *local_memory_ptr = nullptr,
+        void *sub_group_local_memory_ptr = nullptr
+)
   : _group_id{group_id}, 
     _local_range{local_range}, 
     _num_groups{num_groups},
     _group_barrier{group_barrier},
     _local_id{local_id},
-    _local_memory_ptr(local_memory_ptr)
+    _local_memory_ptr(local_memory_ptr),
+    _sub_group_local_memory_ptr(sub_group_local_memory_ptr)
   {}
 
   HIPSYCL_KERNEL_TARGET
@@ -138,6 +142,13 @@ public:
   {
     return _local_memory_ptr;
   }
+
+  HIPSYCL_KERNEL_TARGET
+    void *get_sub_group_local_memory_ptr() const
+  {
+    return _sub_group_local_memory_ptr;
+  }
+
 #endif
 
   HIPSYCL_KERNEL_TARGET

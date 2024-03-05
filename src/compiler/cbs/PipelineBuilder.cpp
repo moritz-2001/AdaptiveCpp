@@ -80,7 +80,6 @@ void registerCBSPipeline(llvm::ModulePassManager &MPM, OptLevel Opt, bool IsSscp
 
   llvm::FunctionPassManager FPM;
   FPM.addPass(LoopSplitterInliningPass{});
-
   if (Opt != OptLevel::O0) {
     FPM.addPass(KernelFlatteningPass{});
     FPM.addPass(SimplifyKernelPass{});
@@ -101,6 +100,11 @@ void registerCBSPipeline(llvm::ModulePassManager &MPM, OptLevel Opt, bool IsSscp
     FPM.addPass(llvm::SimplifyCFGPass{});
   }
 
+/*
+  MPM.addPass(llvm::IPSCCPPass{});
+  FPM.addPass(llvm::InstCombinePass{});
+  FPM.addPass(llvm::SROAPass{llvm::SROAOptions::ModifyCFG});
+*/
   FPM.addPass(SimplifyKernelPass{});
 #ifdef HIPSYCL_NO_PHIS_IN_SPLIT
   FPM.addPass(PHIsToAllocasPass{});
