@@ -76,6 +76,7 @@ struct HierarchicalSplitInfo {
   llvm::ArrayRef<llvm::Value *> OuterIndices;
   llvm::Value *ContiguousIdx;
   llvm::Value *SGIdArg;
+  llvm::SmallVector<std::pair<llvm::AllocaInst *, llvm::Argument *>, 9> *AllocaToArgs;
 };
 
 // gets the load inside F from the global variable called VarName
@@ -91,7 +92,8 @@ llvm::Instruction *getLoadForGlobalVariable(llvm::Function &F, llvm::StringRef V
   return Builder.CreateLoad(SizeT, GV);
 }
 
-llvm::LoadInst *mergeGVLoadsInEntry(llvm::Function &F, llvm::StringRef VarName, llvm::Type* ty = nullptr) {
+llvm::LoadInst *mergeGVLoadsInEntry(llvm::Function &F, llvm::StringRef VarName,
+                                    llvm::Type *ty = nullptr) {
   auto SizeT = F.getParent()->getDataLayout().getLargestLegalIntType(F.getContext());
   auto *GV = F.getParent()->getOrInsertGlobal(VarName, SizeT);
 
@@ -360,11 +362,12 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 
     HIPSYCL_DEBUG_ERROR << "ICMP " << *LocalSize[D] << " " << *IncIndVar << "\n";
 
-    llvm::Value* LoopCond = Builder.CreateICmpULT(IncIndVar, LocalSize[D], "exit.cond." + Suffix);
+    llvm::Value *LoopCond = Builder.CreateICmpULT(IncIndVar, LocalSize[D], "exit.cond." + Suffix);
 
     if (HI.IsSub) {
       assert(D == InnerMost);
-      auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(), "exit.cont_cond." + Suffix);
+      auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
+                                             "exit.cont_cond." + Suffix);
       LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
     }
 
@@ -407,10 +410,10 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
   }
 
   if (!HI.IsSub && !HI.HasSub) {
-      Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
-      VMap[mergeGVLoadsInEntry(F, SgIdGlobalName)] =
-          Builder.CreateURem(IndVars.back(),
-                             llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
+    Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
+    VMap[mergeGVLoadsInEntry(F, SgIdGlobalName)] =
+        Builder.CreateURem(IndVars.back(),
+                           llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
   }
 
   if (HI.IsSub) {
@@ -679,7 +682,6 @@ void SubCFG::replicate(
 
   removeDeadPhiBlocks(BlocksToRemap);
 
-
   EntryBB_ = PreHeader_;
   ExitBB_ = Latches[0];
   HI.ContiguousIdx = Idx;
@@ -809,6 +811,8 @@ void SubCFG::arrayifyMultiSubCfgValues(
         // GEP from already widened alloca: reuse alloca
         if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(&I))
           if (GEP->hasMetadata(hipsycl::compiler::MDKind::Arrayified)) {
+            // TODO if we are in a subgroup function, then the gep opperand is not a AllocaInst, but
+            // an ArgumentInstr
             InstAllocaMap.insert({&I, llvm::cast<llvm::AllocaInst>(GEP->getPointerOperand())});
             continue;
           }
@@ -1198,7 +1202,7 @@ void purgeLifetime(SubCFG &Cfg) {
 }
 
 // fills \a Hull with all transitive users of \a Alloca
-void fillUserHull(llvm::AllocaInst *Alloca, llvm::SmallVectorImpl<llvm::Instruction *> &Hull) {
+void fillUserHull(llvm::Value *Alloca, llvm::SmallVectorImpl<llvm::Instruction *> &Hull) {
   llvm::SmallVector<llvm::Instruction *, 8> WL;
   std::transform(Alloca->user_begin(), Alloca->user_end(), std::back_inserter(WL),
                  [](auto *U) { return llvm::cast<llvm::Instruction>(U); });
@@ -1218,7 +1222,7 @@ void fillUserHull(llvm::AllocaInst *Alloca, llvm::SmallVectorImpl<llvm::Instruct
 }
 
 // checks if all uses of an alloca are in just a single subcfg (doesn't have to be arrayified!)
-bool isAllocaSubCfgInternal(llvm::AllocaInst *Alloca, const std::vector<SubCFG> &SubCfgs,
+bool isAllocaSubCfgInternal(llvm::Value *Alloca, const std::vector<SubCFG> &SubCfgs,
                             const llvm::DominatorTree &DT) {
   llvm::SmallPtrSet<llvm::BasicBlock *, 16> UserBlocks; {
     llvm::SmallVector<llvm::Instruction *, 32> Users;
@@ -1253,59 +1257,110 @@ bool isAllocaSubCfgInternal(llvm::AllocaInst *Alloca, const std::vector<SubCFG> 
 // \a Idx.
 void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
                      std::vector<SubCFG> &SubCfgs, llvm::Value *ReqdArrayElements,
-                     VectorizationInfo &VecInfo) {
+                     VectorizationInfo &VecInfo, llvm::Function &F, HierarchicalSplitInfo HI) {
   auto *MDAlloca = llvm::MDNode::get(
       EntryBlock->getContext(), {llvm::MDString::get(EntryBlock->getContext(), MDKind::LoopState)});
 
   llvm::SmallPtrSet<llvm::BasicBlock *, 32> SubCfgsBlocks;
   for (auto &SubCfg : SubCfgs)
-    SubCfgsBlocks.insert(SubCfg.getNewBlocks().begin(), SubCfg.getNewBlocks().end());
-
-  llvm::SmallVector<llvm::AllocaInst *, 8> WL;
-  for (auto &I : *EntryBlock) {
-    if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
-      if (Alloca->hasMetadata(hipsycl::compiler::MDKind::Arrayified))
-        continue; // already arrayified
-      if (utils::anyOfUsers<llvm::Instruction>(Alloca, [&SubCfgsBlocks](llvm::Instruction *UI) {
-        return !SubCfgsBlocks.contains(UI->getParent());
-      }))
-        continue;
-      if (!isAllocaSubCfgInternal(Alloca, SubCfgs, DT))
-        WL.push_back(Alloca);
-    }
-  }
-
-  for (auto *I : WL) {
-    llvm::IRBuilder AllocaBuilder{I};
-    llvm::Type *T = I->getAllocatedType();
-    if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(I->getArraySize())) {
-      auto ArrSize = ArrSizeC->getLimitedValue();
-      if (ArrSize > 1) {
-        T = llvm::ArrayType::get(T, ArrSize);
-        HIPSYCL_DEBUG_WARNING << "Caution, alloca was array\n";
+    SubCfgsBlocks.insert(SubCfg.getNewBlocks().begin(), SubCfg.getNewBlocks().end()); {
+    llvm::SmallVector<llvm::AllocaInst *, 8> WL;
+    for (auto &I : *EntryBlock) {
+      if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
+        if (Alloca->hasMetadata(hipsycl::compiler::MDKind::Arrayified))
+          continue; // already arrayified
+        if (utils::anyOfUsers<llvm::Instruction>(Alloca, [&SubCfgsBlocks](llvm::Instruction *UI) {
+          return !SubCfgsBlocks.contains(UI->getParent());
+        }))
+          continue;
+        if (!isAllocaSubCfgInternal(Alloca, SubCfgs, DT))
+          WL.push_back(Alloca);
       }
     }
 
-    auto *Alloca = AllocaBuilder.CreateAlloca(T, ReqdArrayElements, I->getName() + "_alloca");
-    Alloca->setAlignment(llvm::Align{hipsycl::compiler::DefaultAlignment});
-    Alloca->setMetadata(hipsycl::compiler::MDKind::Arrayified, MDAlloca);
-    HIPSYCL_DEBUG_ERROR << "ARRAIFY: " << I->getName() + "_alloca" << "\n";
+    for (auto *I : WL) {
+      llvm::IRBuilder AllocaBuilder{I};
+      llvm::Type *T = I->getAllocatedType();
+      if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(I->getArraySize())) {
+        auto ArrSize = ArrSizeC->getLimitedValue();
+        if (ArrSize > 1) {
+          T = llvm::ArrayType::get(T, ArrSize);
+          HIPSYCL_DEBUG_WARNING << "Caution, alloca was array\n";
+        }
+      }
 
-    for (auto &SubCfg : SubCfgs) {
-      auto *GepIp = SubCfg.getLoadBB()->getFirstNonPHIOrDbgOrLifetime();
-      auto *ContiguousIdx = SubCfg.getHI().IsSub
-                              ? SubCfg.getHI().SGIdArg
-                              : SubCfg.getHI().ContiguousIdx;
+      auto *Alloca = AllocaBuilder.CreateAlloca(T, ReqdArrayElements, I->getName() + "_alloca");
+      Alloca->setAlignment(llvm::Align{hipsycl::compiler::DefaultAlignment});
+      Alloca->setMetadata(hipsycl::compiler::MDKind::Arrayified, MDAlloca);
+      //HIPSYCL_DEBUG_ERROR << "ARRAIFY: " << I->getName() + "_alloca" << "\n";
 
-      llvm::IRBuilder LoadBuilder{GepIp};
-      auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
-          Alloca->getAllocatedType(), Alloca, ContiguousIdx, I->getName() + "_gep"));
-      GEP->setMetadata(hipsycl::compiler::MDKind::Arrayified, MDAlloca);
+      for (auto &SubCfg : SubCfgs) {
+        auto *GepIp = SubCfg.getLoadBB()->getFirstNonPHIOrDbgOrLifetime();
+        auto *ContiguousIdx = SubCfg.getHI().IsSub
+                                ? SubCfg.getHI().SGIdArg
+                                : SubCfg.getHI().ContiguousIdx;
 
-      llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
+        llvm::IRBuilder LoadBuilder{GepIp};
+        auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
+            Alloca->getAllocatedType(), Alloca, ContiguousIdx, I->getName() + "_gep"));
+        GEP->setMetadata(hipsycl::compiler::MDKind::Arrayified, MDAlloca);
+
+        llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
+      }
+      I->eraseFromParent();
     }
-    I->eraseFromParent();
   }
+
+  if (HI.IsSub) {
+    std::vector<std::pair<llvm::AllocaInst *, llvm::Argument *> > WL;
+    for (auto [Alloca, Arg] : *HI.AllocaToArgs) {
+      // already arrayified:
+      // If it happened in the group function, then all uses should have been replaced with
+      // gep's.
+      // If it happened in the current subgroup function, then it has not happened on the group level.
+      // Therefore, the alloca is only used in the current subgroup function.
+      if (Alloca->hasMetadata(hipsycl::compiler::MDKind::Arrayified))
+        continue;
+
+      if (!isAllocaSubCfgInternal(Arg, SubCfgs, DT)) {
+        WL.emplace_back(Alloca, Arg);
+      }
+    }
+
+    for (auto [Alloca, Arg] : WL) {
+      llvm::IRBuilder AllocaBuilder{Alloca};
+      llvm::Type *T = Alloca->getAllocatedType();
+      if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(Alloca->getArraySize())) {
+        auto ArrSize = ArrSizeC->getLimitedValue();
+        if (ArrSize > 1) {
+          T = llvm::ArrayType::get(T, ArrSize);
+          HIPSYCL_DEBUG_WARNING << "Caution, alloca was array\n";
+        }
+      }
+
+      auto *ArrayifiedAlloca = AllocaBuilder.CreateAlloca(T, ReqdArrayElements,
+                                                          Alloca->getName() + "_alloca");
+      ArrayifiedAlloca->setAlignment(llvm::Align{hipsycl::compiler::DefaultAlignment});
+      ArrayifiedAlloca->setMetadata(hipsycl::compiler::MDKind::Arrayified, MDAlloca);
+
+      for (auto &SubCfg : SubCfgs) {
+        auto *GepIp = SubCfg.getLoadBB()->getFirstNonPHIOrDbgOrLifetime();
+        auto *ContiguousIdx = SubCfg.getHI().SGIdArg;
+
+        llvm::IRBuilder LoadBuilder{GepIp};
+        auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
+            Alloca->getAllocatedType(), Arg, ContiguousIdx, Alloca->getName() + "_gep"));
+        GEP->setMetadata(hipsycl::compiler::MDKind::Arrayified, MDAlloca);
+
+        llvm::replaceDominatedUsesWith(Arg, GEP, DT, SubCfg.getLoadBB());
+      }
+      // TODO function signature of subgroup level function is wrong ?
+      // I can do this, because alloca is only used in the current subgroup function
+      Alloca->replaceAllUsesWith(ArrayifiedAlloca);
+      Alloca->eraseFromParent();
+    }
+  }
+
 }
 
 void moveAllocasToEntry(llvm::Function &F, llvm::ArrayRef<llvm::BasicBlock *> Blocks) {
@@ -1359,25 +1414,33 @@ void formSubgroupCfg(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationInf
   // function arguments)
   // InAndOutToArgs: Old Instruction -> Function Argument
   llvm::ValueToValueMapTy InAndOutToArgs;
-  {
-    HIPSYCL_DEBUG_ERROR << "Inputs:" << "\n";
+  llvm::SmallVector<std::pair<llvm::AllocaInst *, llvm::Argument *>, 9> AllocaToArgs; {
+    HIPSYCL_DEBUG_INFO << "Inputs:" << "\n";
     int Cnter = 0;
     for (auto I : Inputs) {
       HIPSYCL_DEBUG_INFO << *I << " -> " << *NewF->getArg(Cnter) << "\n";
-      InAndOutToArgs[I] = NewF->getArg(Cnter++);
+      InAndOutToArgs[I] = NewF->getArg(Cnter);
+      if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(I)) {
+        AllocaToArgs.emplace_back(std::pair{Alloca, NewF->getArg(Cnter)});
+      }
+      Cnter++;
     }
     HIPSYCL_DEBUG_INFO << "Outputs:"
                            << "\n";
     for (auto O : Outputs) {
       HIPSYCL_DEBUG_INFO << *O << " -> " << *NewF->getArg(Cnter) << "\n";
-      InAndOutToArgs[O] = NewF->getArg(Cnter++);
+      InAndOutToArgs[O] = NewF->getArg(Cnter);
+      if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(O)) {
+        AllocaToArgs.emplace_back(std::pair{Alloca, NewF->getArg(Cnter)});
+      }
+      Cnter++;
     }
   }
 
   // Create barriers at the beginning and end of the cfg
   {
     utils::createSubBarrier(NewF->getEntryBlock().getTerminator(),
-                          const_cast<SplitterAnnotationInfo &>(SAA));
+                            const_cast<SplitterAnnotationInfo &>(SAA));
     for (auto &BB : *NewF)
       if (BB.getTerminator()->getNumSuccessors() == 0)
         utils::createSubBarrier(BB.getTerminator(), const_cast<SplitterAnnotationInfo &>(SAA));
@@ -1435,7 +1498,7 @@ void formSubgroupCfg(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationInf
                      return It->second;
                    }
                    HIPSYCL_DEBUG_INFO << " --> load from global: " << *V << "\n";
-                  // TODO why with type & what has it to do with GlobalVarToIdxMap
+                   // TODO why with type & what has it to do with GlobalVarToIdxMap
                    return mergeGVLoadsInEntry(
                        *NewF, LocalSizeGlobalNames[D - 1], V->getType());
                  });
@@ -1468,10 +1531,8 @@ void formSubgroupCfg(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationInf
   formSubCfgGeneric(*NewF, NewLI, NewDT, NewPDT, SAA, IsSscp, Dim,
                     {llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize)},
                     llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize),
-                    {true, false, NewLocalSize, NewIndVars, NewIndVar, SGIdArg}
-      );
-
-  {
+                    {true, false, NewLocalSize, NewIndVars, NewIndVar, SGIdArg, &AllocaToArgs}
+      ); {
     for (size_t D = 0; D < LocalSize.size(); ++D) {
       // GlobalVarToIdxMap[NewIndVars[D]] = Cfg.getWIIndVars()[D];
       HIPSYCL_DEBUG_ERROR << "newlocal: " << *NewLocalSize[D] << " uses: " << NewLocalSize[D]->
@@ -1490,7 +1551,6 @@ getNumUses() << " outer " << *LocalSize[D] << "\n";
   //HIPSYCL_DEBUG_EXECUTE_ERROR(NewF->viewCFG();)
   assert(std::distance(NewF->user_begin(), NewF->user_end()) == 1);
   utils::checkedInlineFunction(llvm::cast<llvm::CallBase>(NewF->user_back()), "[SubCFG]");
-
 
   llvm::SmallVector<llvm::BasicBlock *> FunBlocks;
   std::transform(F.begin(), F.end(), std::back_inserter(FunBlocks),
@@ -1576,7 +1636,7 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
   llvm::removeUnreachableBlocks(F);
 
   DT.recalculate(F);
-  arrayifyAllocas(&F.getEntryBlock(), DT, SubCFGs, ReqdArrayElements, VecInfo);
+  arrayifyAllocas(&F.getEntryBlock(), DT, SubCFGs, ReqdArrayElements, VecInfo, F, HI);
 
   for (auto &Cfg : SubCFGs) {
     Cfg.fixSingleSubCfgValues(DT, RemappedInstAllocaMap, ReqdArrayElements, VecInfo);
