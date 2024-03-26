@@ -39,6 +39,7 @@
 #include "../vec.hpp"
 #include "hipSYCL/sycl/libkernel/host/host_backend.hpp"
 #include <type_traits>
+#include "rv_shuffle.h"
 
 #if HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_HOST
 
@@ -395,6 +396,8 @@ HIPSYCL_KERNEL_TARGET
 T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
   const size_t lid = g.get_local_linear_id();
   const size_t lrange = g.get_local_linear_range();
+
+  const unsigned int activemask = rv_ballot(rv_mask());
 
   auto local_x = x;
 

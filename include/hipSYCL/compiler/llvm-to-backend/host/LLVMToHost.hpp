@@ -43,13 +43,15 @@ public:
 
   virtual ~LLVMToHostTranslator() {}
 
-  virtual bool prepareBackendFlavor(llvm::Module& M) override {return true;}
-  virtual bool toBackendFlavor(llvm::Module &M, PassHandler& PH) override;
-  virtual bool translateToBackendFormat(llvm::Module &FlavoredModule, std::string &out) override;
+  bool prepareBackendFlavor(llvm::Module& M) override {return true;}
+
+  bool toBackendFlavor(llvm::Module &M, PassHandler& PH) override;
+
+  bool translateToBackendFormat(llvm::Module &FlavoredModule, std::string &out) override;
 protected:
-  virtual bool applyBuildOption(const std::string &Option, const std::string &Value) override;
-  virtual bool isKernelAfterFlavoring(llvm::Function& F) override;
-  virtual AddressSpaceMap getAddressSpaceMap() const override;
+  bool applyBuildOption(const std::string &Option, const std::string &Value) override;
+  bool isKernelAfterFlavoring(llvm::Function& F) override;
+  AddressSpaceMap getAddressSpaceMap() const override;
 private:
   std::vector<std::string> KernelNames;
 };
