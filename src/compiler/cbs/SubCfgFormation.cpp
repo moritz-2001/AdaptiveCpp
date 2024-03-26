@@ -806,15 +806,12 @@ void SubCFG::arrayifyMultiSubCfgValues(
             // TODO if we are in a subgroup function, then the gep opperand is not a AllocaInst, but
             // an ArgumentInstr
             auto *GepPointerOperand = GEP->getPointerOperand();
-            // if (!GepPointerOperand) {
-            //   HIPSYCL_DEBUG_ERROR << "POINTER OPERAD IS NOT ALLOCA: " << *GEP << "\n";
-            //   //HIPSYCL_DEBUG_EXECUTE_ERROR(F.viewCFG());
-            // }
             if (HI.IsSub) {
-              for (auto [Arg, Alloca] : *HI.ArgsToAloca) {
-                if (GepPointerOperand == Arg) {
-                  GepPointerOperand = Alloca;
-                }
+              const auto it = std::find_if(HI.ArgsToAloca->begin(), HI.ArgsToAloca->end(), [&](const auto v) {
+                return v.first == GepPointerOperand;
+              });
+              if (it != HI.ArgsToAloca->end()) {
+                GepPointerOperand = it->second;
               }
             }
             InstAllocaMap.insert({&I, llvm::cast<llvm::AllocaInst>(GepPointerOperand)});
@@ -889,15 +886,13 @@ void SubCFG::loadMultiSubCfgValues(
         if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(Inst)) {
           if (auto *MDArrayified = GEP->getMetadata(hipsycl::compiler::MDKind::Arrayified)) {
             // TODO this is a weird hack I added and does probably not generalize well.
-            llvm::Value *ContIdx = VMap[HI.ContiguousIdx];
+            llvm::Value *ContIdx  = NewContIdx;
             auto *Type = GEP->getPointerOperand()->getType();
-            if (HI.IsSub) {
-              assert(
-                  HI.ArgsToAloca->count(llvm::cast<llvm::Argument>(GEP->getPointerOperand())) > 0);
-              auto *Alloca = HI.ArgsToAloca->operator[](
-                  llvm::cast<llvm::Argument>(GEP->getPointerOperand()));
+            if (auto* arg = llvm::dyn_cast<llvm::Argument>(GEP->getPointerOperand())) {
+              assert(HI.IsSub);
+              ContIdx = VMap[HI.ContiguousIdx];
+              auto* Alloca = (*HI.ArgsToAloca)[arg];
               Type = Alloca->getAllocatedType();
-              HIPSYCL_DEBUG_ERROR << "TYPE: " << *Type << "\n";
             }
             auto *NewGEP = llvm::cast<llvm::GetElementPtrInst>(Builder.CreateInBoundsGEP(
                 Type, GEP->getPointerOperand(), ContIdx, GEP->getName() + "c"));
