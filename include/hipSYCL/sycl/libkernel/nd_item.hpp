@@ -183,6 +183,7 @@ struct nd_item
         get_local_id(),
         _local_memory_ptr,
         _sub_local_memory_ptr,
+         get_sub_group()
     };
 #endif
   }

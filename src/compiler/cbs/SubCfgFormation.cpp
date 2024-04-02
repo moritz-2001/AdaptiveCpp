@@ -356,12 +356,12 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 
     llvm::Value *LoopCond = Builder.CreateICmpULT(IncIndVar, LocalSize[D], "exit.cond." + Suffix);
 
-    if (HI.IsSub) {
-      assert(D == InnerMost);
-      auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
-                                             "exit.cont_cond." + Suffix);
-      LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
-    }
+    // if (HI.IsSub) {
+    //   assert(D == InnerMost);
+    //   auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
+    //                                          "exit.cont_cond." + Suffix);
+    //   LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
+    // }
 
     Builder.CreateCondBr(LoopCond, Header, AfterBB);
     Latches.push_back(Latch);
@@ -376,7 +376,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     IndVars[D]->replaceIncomingBlockWith(&F.getEntryBlock(), IndVars[D - 1]->getParent());
   }
 
-  if (!HI.HasSub) {
+ if (!HI.HasSub) {
     auto *MDWorkItemLoop = llvm::MDNode::get(
         F.getContext(), {llvm::MDString::get(F.getContext(), MDKind::WorkItemLoop)});
     auto *LoopID =
@@ -1532,7 +1532,7 @@ void formSubgroupCfg(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationInf
     for (auto U : SGIdArg->users()) {
       HIPSYCL_DEBUG_ERROR << "SGIDArg user: " << *U << "\n";
     }
-    SGIdArg->replaceAllUsesWith(mergeGVLoadsInEntry(*NewF, SgIdGlobalName));
+    SGIdArg->replaceAllUsesWith(mergeGVLoadsInEntry(*NewF, SgIdGlobalName, SGIdArg->getType()));
     SGIdArg = mergeGVLoadsInEntry(*NewF, SgIdGlobalName);
     HIPSYCL_DEBUG_ERROR << "New SGIDArg: " << *SGIdArg << "\n";
   }

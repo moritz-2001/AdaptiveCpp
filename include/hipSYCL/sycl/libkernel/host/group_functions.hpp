@@ -73,6 +73,31 @@ template <int Dim, typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x,
                                                BinaryOperation binary_op,
                                                T *scratch) {
+/*
+const auto sg = g.get_sub_group();
+
+  const auto lid = g.get_local_linear_id();
+
+  x = reduce_over_group(sg, x, sycl::plus<int>());
+
+  if (sg.leader()) {
+	scratch[sg.get_group_linear_id()] = x;
+  }
+
+  __hipsycl_group_barrier(g);
+
+  if (sg.get_group_linear_id() == 0) {
+	x = scratch[lid];
+	x = reduce_over_group(sg, x, sycl::plus<int>());
+
+	if (sg.leader()) {
+	  scratch[0] = x;
+	}
+  }
+
+  __hipsycl_group_barrier(g);
+  return scratch[0];
+*/
   const size_t lid = g.get_local_linear_id();
 
   scratch[lid] = x;
@@ -397,7 +422,7 @@ T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
   const size_t lid = g.get_local_linear_id();
   const size_t lrange = g.get_local_linear_range();
 
-  const unsigned int activemask = rv_ballot(rv_mask());
+ // const unsigned int activemask = rv_ballot(rv_mask());
 
   auto local_x = x;
 
