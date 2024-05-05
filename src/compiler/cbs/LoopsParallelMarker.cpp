@@ -174,7 +174,7 @@ hipsycl::compiler::LoopsParallelMarkerPass::run(llvm::Function &F,
     llvm::outs() << "MARKED AS KERNEL FUNCTION\n";
     markLoopsWorkItem(F, LI, TTI);
     llvm::AttrBuilder B{F.getContext()};
-    B.addAttribute("iskernel");
+    B.addAttribute(llvm::Attribute::get(F.getContext(), "iskernel", std::to_string(SGSize)));
     F.addFnAttrs(B);
   }
 
