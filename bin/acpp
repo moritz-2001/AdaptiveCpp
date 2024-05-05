@@ -1460,6 +1460,8 @@ class omp_accelerated_invocation:
       ]
     flags += self._cxx_flags
 
+    flags += ["-march=native"]
+
     flags += ["-mllvm", "-rv"]
 
     return flags
