@@ -168,8 +168,15 @@ hipsycl::compiler::LoopsParallelMarkerPass::run(llvm::Function &F,
     llvm::errs() << "SplitterAnnotationAnalysis not cached.\n";
     return llvm::PreservedAnalyses::all();
   }
-  if (SAA->isKernelFunc(&F))
+
+
+  if (SAA->isKernelFunc(&F)) {
+    llvm::outs() << "MARKED AS KERNEL FUNCTION\n";
     markLoopsWorkItem(F, LI, TTI);
+    llvm::AttrBuilder B{F.getContext()};
+    B.addAttribute("iskernel");
+    F.addFnAttrs(B);
+  }
 
   return llvm::PreservedAnalyses::all();
 }
