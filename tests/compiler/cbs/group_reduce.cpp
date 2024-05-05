@@ -28,27 +28,9 @@ int main() {
       cgh.parallel_for<class dynamic_local_memory_reduction>(
           cl::sycl::nd_range<1>{global_size, local_size}, [=](cl::sycl::nd_item<1> item) noexcept {
             const auto g = item.get_group();
-            const auto sg = item.get_sub_group();
-            const auto lid = item.get_local_id(0);
 
             auto val = acc[item.get_global_id()];
-            val = cl::sycl::reduce_over_group(sg, val, cl::sycl::plus<int>());
-
-            if (sg.leader()) {
-              scratch[sg.get_group_linear_id()] = val;
-            }
-
-            cl::sycl::group_barrier(g);
-
-
-            if (sg.get_group_linear_id() == 0) {
-              val = scratch[lid];
-              val = cl::sycl::reduce_over_group(sg, val, cl::sycl::plus<int>());
-
-              if (sg.leader()) {
-                acc[item.get_global_id()] = val;
-              }
-            }
+            acc[item.get_global_id()] = cl::sycl::reduce_over_group(g, val, cl::sycl::plus<int>());
           });
     });
   }
