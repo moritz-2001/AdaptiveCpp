@@ -183,7 +183,7 @@ llvm::AllocaInst *arrayifyInstruction(llvm::Instruction *IPAllocas, llvm::Instru
 llvm::LoadInst *loadFromAlloca(llvm::AllocaInst *Alloca, llvm::Value *Idx,
                                llvm::Instruction *InsertBefore, const llvm::Twine &NamePrefix = "");
 
-llvm::AllocaInst *getLoopStateAllocaForLoad(llvm::LoadInst &LInst);
+llvm::AllocaInst *getLoopStateAllocaForLoad(llvm::LoadInst &LInst, llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8>* ArgsToAlloca = nullptr);
 
 template <class UserType, class Func> bool anyOfUsers(llvm::Value *V, Func &&L) {
   for (auto *U : V->users())

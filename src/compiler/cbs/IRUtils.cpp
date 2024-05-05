@@ -547,10 +547,21 @@ llvm::LoadInst *loadFromAlloca(llvm::AllocaInst *Alloca, llvm::Value *Idx,
 }
 
 // get the work-item state alloca a load reads from (through GEPs..)
-llvm::AllocaInst *getLoopStateAllocaForLoad(llvm::LoadInst &LInst) {
+llvm::AllocaInst *  getLoopStateAllocaForLoad(llvm::LoadInst &LInst, llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8>* ArgsToAlloca) {
   llvm::AllocaInst *Alloca = nullptr;
   if (auto *GEPI = llvm::dyn_cast<llvm::GetElementPtrInst>(LInst.getPointerOperand())) {
-    Alloca = llvm::dyn_cast<llvm::AllocaInst>(GEPI->getPointerOperand());
+    auto* Arg = llvm::dyn_cast<llvm::Argument>(GEPI->getPointerOperand());
+    if (Arg && ArgsToAlloca) {
+        Alloca = (*ArgsToAlloca)[Arg];
+    } else {
+      Alloca = llvm::dyn_cast<llvm::AllocaInst>(GEPI->getPointerOperand());
+    }
+  } else if (auto* Arg = llvm::dyn_cast<llvm::Argument>(LInst.getPointerOperand())) {
+    if (auto* Arg = llvm::dyn_cast<llvm::Argument>(LInst.getPointerOperand())) {
+      if (ArgsToAlloca) {
+        Alloca = (*ArgsToAlloca)[Arg];
+      }
+    }
   } else {
     Alloca = llvm::dyn_cast<llvm::AllocaInst>(LInst.getPointerOperand());
   }
