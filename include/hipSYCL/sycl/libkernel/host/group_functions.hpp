@@ -73,50 +73,64 @@ template <int Dim, typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x,
                                                BinaryOperation binary_op,
                                                T *scratch) {
-/*
-const auto sg = g.get_sub_group();
+#ifdef RV
+  const auto lid = g.get_local_linear_id();
+  const std::size_t local_range = g.get_local_range().size();
+  sub_group sg{};
 
+  scratch[lid] = x;
+  __hipsycl_group_barrier(g);
+
+  size_t i = 1;
+
+  if (lid < rv_num_lanes() && rv_num_lanes() <= local_range) {
+    #pragma clang loop vectorize_width(1)
+    for (i = rv_num_lanes(); i + rv_num_lanes() <= local_range;
+         i += rv_num_lanes()) {
+      x = binary_op(x, scratch[i + rv_lane_id()]);
+    }
+    x = reduce_over_group(sg, x, binary_op);
+  }
+
+  __hipsycl_group_barrier(g); // as this starts a new loop with CBS,
+                    // LLVM detects it's actually just one iteration and optimizes it
+
+  if (g.leader()) {
+    #pragma clang loop vectorize_width(1)
+    for (; i < local_range; ++i)
+      x = binary_op(x, scratch[i]);
+    scratch[0] = x;
+  }
+
+  __hipsycl_group_barrier(g);
+  x = scratch[0];
+  __hipsycl_group_barrier(g);
+
+  return x;
+#else
+  const auto sg = g.get_sub_group();
   const auto lid = g.get_local_linear_id();
 
   x = reduce_over_group(sg, x, sycl::plus<int>());
 
   if (sg.leader()) {
-	scratch[sg.get_group_linear_id()] = x;
+	  scratch[g.get_local_id() / 32] = x;
   }
 
   __hipsycl_group_barrier(g);
 
-  if (sg.get_group_linear_id() == 0) {
-	x = scratch[lid];
-	x = reduce_over_group(sg, x, sycl::plus<int>());
+  if (g.get_local_id() < 32) {
+	  x = scratch[lid];
+	  x = reduce_over_group(sg, x, sycl::plus<int>());
 
-	if (sg.leader()) {
-	  scratch[0] = x;
-	}
+	  if (sg.leader()) {
+	    scratch[0] = x;
+	  }
   }
 
   __hipsycl_group_barrier(g);
   return scratch[0];
-*/
-  const size_t lid = g.get_local_linear_id();
-
-  scratch[lid] = x;
-  __hipsycl_group_barrier(g);
-
-  if (g.leader()) {
-    T result = scratch[0];
-
-    for (int i = 1; i < g.get_local_range().size(); ++i)
-      result = binary_op(result, scratch[i]);
-
-    scratch[0] = result;
-  }
-
-  __hipsycl_group_barrier(g);
-  T tmp = scratch[0];
-  __hipsycl_group_barrier(g);
-
-  return tmp;
+#endif
 }
 
 
@@ -155,6 +169,10 @@ template<typename T>
 HIPSYCL_KERNEL_TARGET
 T __hipsycl_group_broadcast(sub_group g, T x,
                   typename sub_group::linear_id_type local_id) {
+#ifdef RV
+  return ::hipsycl::sycl::detail::extract_impl(x, local_id);
+#else
+
   T *scratch = static_cast<T *>(g.get_local_memory_ptr());
   const size_t lid = g.get_local_linear_id();
   if (lid == local_id) {
@@ -166,11 +184,15 @@ T __hipsycl_group_broadcast(sub_group g, T x,
   __hipsycl_group_barrier(g);
 
   return tmp;
+#endif
 }
 
 template <typename T>
 HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_left(
     sub_group g, T x, typename sub_group::linear_id_type delta = 1) {
+   #ifdef RV
+  return ::hipsycl::sycl::detail::shuffle_down_impl(x, delta);
+   #else
   T *scratch = static_cast<T *>(g.get_local_memory_ptr());
 
    auto lid = g.get_local_linear_id();
@@ -179,13 +201,15 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_left(
 
    __hipsycl_group_barrier(g);
 
-   if (target_lid > g.get_local_range().size())
+   if (target_lid >= g.get_local_range().size())
      target_lid = 0;
+
    x = scratch[target_lid];
 
    __hipsycl_group_barrier(g);
 
    return x;
+   #endif
 }
 
 // any_of
@@ -419,10 +443,20 @@ T __hipsycl_reduce_over_group(group<Dim> g, T x, BinaryOperation binary_op) {
 template<typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET
 T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
+#ifdef RV
+  const size_t lid = g.get_local_linear_id();
+  const bool mask = rv_mask();
+
+  auto local_x = x;
+  for (size_t i = rv_num_lanes() / 2; i > 0; i /= 2) {
+    auto other_x = ::hipsycl::sycl::detail::shuffle_down_impl(local_x, i);
+    if (mask && (1 << (lid + i)))
+      local_x = binary_op(local_x, other_x);
+  }
+  return ::hipsycl::sycl::detail::extract_impl(local_x, 0);
+#else
   const size_t lid = g.get_local_linear_id();
   const size_t lrange = g.get_local_linear_range();
-
- // const unsigned int activemask = rv_ballot(rv_mask());
 
   auto local_x = x;
 
@@ -430,7 +464,10 @@ T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
     auto other_x = __hipsycl_shift_group_left(g, local_x, i);
     local_x = binary_op(local_x, other_x);
   }
-  return __hipsycl_group_broadcast(g, local_x, 0);
+
+  return local_x;
+  //return __hipsycl_group_broadcast(g, local_x, 0);
+#endif
 }
 
 // exclusive_scan
