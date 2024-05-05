@@ -40,13 +40,14 @@
 #include "sscp/builtins/subgroup.hpp"
 #endif
 
-
 #define HIERACHICAL
 //#define RV
 
 #if defined(RV)
 #include "host/rv.h"
 #endif
+
+constexpr size_t SgSize = 32;
 
 
 namespace hipsycl {
@@ -90,12 +91,12 @@ public:
   // always returns the maximum sub_group size
   HIPSYCL_KERNEL_TARGET
   linear_range_type get_local_linear_range() const {
-    return 32; // TODO wrong for incomplete subgroups
+    return SgSize; // TODO wrong for incomplete subgroups
   }
 
   HIPSYCL_KERNEL_TARGET
   range_type get_max_local_range() const {
-    return range_type{32};
+    return range_type{get_local_linear_range()};
   }
 
   HIPSYCL_KERNEL_TARGET
