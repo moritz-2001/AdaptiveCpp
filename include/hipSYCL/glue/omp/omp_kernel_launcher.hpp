@@ -153,9 +153,7 @@ void reducible_parallel_invocation(Function kernel,
 extern "C" size_t __hipsycl_cbs_local_id_x;
 extern "C" size_t __hipsycl_cbs_local_id_y;
 extern "C" size_t __hipsycl_cbs_local_id_z;
-#ifdef HIERACHICAL
 extern "C" size_t __hipsycl_cbs_local_id_subgroup;
-#endif
 
 template <int Dim, class Function, class ...Reducers>
 HIPSYCL_LOOP_SPLIT_ND_KERNEL __attribute__((noinline))

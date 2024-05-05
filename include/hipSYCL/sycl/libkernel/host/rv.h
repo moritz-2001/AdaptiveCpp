@@ -8,7 +8,7 @@ extern "C" bool rv_all(bool);
 extern "C" std::uint32_t rv_ballot(bool);
 extern "C" std::uint32_t rv_popcount(bool);
 extern "C" std::uint32_t rv_index(bool);
-extern "C" std::uint32_t rv_mask();
+extern "C" bool rv_mask();
 // rv_compact(float V, bool M)
 extern "C" std::uint32_t rv_lane_id();
 extern "C" std::uint32_t rv_num_lanes();

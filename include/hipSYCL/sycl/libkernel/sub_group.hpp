@@ -40,14 +40,19 @@
 #include "sscp/builtins/subgroup.hpp"
 #endif
 
+
 #define HIERACHICAL
+//#define RV
+
+#if defined(RV)
+#include "host/rv.h"
+#endif
+
 
 namespace hipsycl {
 namespace sycl {
 
-
-#ifdef HIERACHICAL
-
+#if defined(HIERACHICAL) and not defined(RV)
 class sub_group {
 public:
   using id_type = sycl::id<1>;
@@ -135,6 +140,86 @@ private:
   size_t _subgroup_id;
 
 };
+
+#elif defined(RV)
+class sub_group {
+public:
+  using id_type = sycl::id<1>;
+  using range_type = sycl::range<1>;
+  using linear_id_type = uint32_t;
+  using linear_range_type = uint32_t;
+
+  static constexpr int dimensions = 1;
+  static constexpr memory_scope fence_scope = memory_scope::sub_group;
+
+  sub_group() {}
+
+  HIPSYCL_KERNEL_TARGET
+  id_type get_local_id() const {
+    return id_type{get_local_linear_id()};
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  linear_id_type get_local_linear_id() const {
+    return rv_lane_id();
+  }
+
+  // always returns the maximum sub_group size
+  HIPSYCL_KERNEL_TARGET
+  range_type get_local_range() const {
+    return range_type{get_local_linear_range()};
+  }
+
+  // always returns the maximum sub_group size
+  HIPSYCL_KERNEL_TARGET
+  linear_range_type get_local_linear_range() const {
+    return 32; // TODO wrong for incomplete subgroups
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  range_type get_max_local_range() const {
+    return range_type{32};
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  id_type get_group_id() const {
+    return id_type{get_group_linear_id()};
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  linear_id_type get_group_linear_id() const {
+    assert(false); // TODO implement
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  linear_range_type get_group_linear_range() const {
+    return rv_num_lanes();
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  range_type get_group_range() const {
+    return range_type{get_group_linear_range()};
+  }
+
+  [[deprecated]]
+  HIPSYCL_KERNEL_TARGET
+  range_type get_max_group_range() const {
+    return get_group_range();
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  bool leader() const {
+    return rv_lane_id() == 0;
+  }
+
+  HIPSYCL_KERNEL_TARGET
+  void *get_local_memory_ptr() const {
+    return _local_memory;
+  }
+private:
+  void* _local_memory;
+};
+
 #else
 class sub_group {
 public:

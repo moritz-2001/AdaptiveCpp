@@ -52,6 +52,7 @@ void copy_bits(T &tgt, const std::array<float, Words> &words) {
 }
 
 template <typename T, typename Operation> T apply_on_data(T x, Operation &&op) {
+  // roundUp(sizeof(T) / sizeof(float))
   constexpr std::size_t words_no =
       (sizeof(T) + sizeof(float) - 1) / sizeof(float);
 
@@ -72,17 +73,9 @@ template <typename T, typename Operation> T apply_on_data(T x, Operation &&op) {
 // difference between shuffle_impl and extract_impl: id for extract must be
 // uniform value.
 template <typename T> HIPSYCL_FORCE_INLINE T shuffle_impl(T x, int id) {
-  #ifndef HIPSYCL_RV_LEGACY
-  T ret = x;
-  for (int i = 0; i < rv_num_lanes(); ++i) {
-    const int srcLane = intrin_extract(id, i);
-    const T v = intrin_extract(x, srcLane);
-    ret = intrin_insert(ret, i, v);
-  }
-  return ret;
-  #else
   return apply_on_data(x, [id](const float data) {
     float ret = data;
+#pragma unroll
     for (int i = 0; i < rv_num_lanes(); ++i) {
       const int srcLane = rv_extract(id, i);
       const float v = rv_extract(data, srcLane);
@@ -90,30 +83,17 @@ template <typename T> HIPSYCL_FORCE_INLINE T shuffle_impl(T x, int id) {
     }
     return ret;
   });
-  #endif
 }
 
 template <typename T> HIPSYCL_FORCE_INLINE T extract_impl(T x, int id) {
-  #ifndef HIPSYCL_RV_LEGACY
-  return intrin_extract(x, id);
-  #else
   return apply_on_data(x,
                        [id](const float data) { return rv_extract(data, id); });
-#endif
 }
 
 template <typename T> HIPSYCL_FORCE_INLINE T shuffle_up_impl(T x, int offset) {
-  #ifndef HIPSYCL_RV_LEGACY
-  T ret = x;
-  for (int i = 0; i < rv_num_lanes(); ++i) {
-    const T v =
-        intrin_extract(x, (rv_num_lanes() - offset + i) % rv_num_lanes());
-    ret = intrin_insert(ret, i, v);
-  }
-  return ret;
-  #else
   return apply_on_data(x, [offset](const float data) {
     float ret = data;
+#pragma unroll
     for (int i = 0; i < rv_num_lanes(); ++i) {
       const float v =
           rv_extract(data, (rv_num_lanes() - offset + i) % rv_num_lanes());
@@ -121,48 +101,30 @@ template <typename T> HIPSYCL_FORCE_INLINE T shuffle_up_impl(T x, int offset) {
     }
     return ret;
   });
-  #endif
 }
+
 template <typename T>
 HIPSYCL_FORCE_INLINE T shuffle_down_impl(T x, int offset) {
-  #ifndef HIPSYCL_RV_LEGACY
-  T ret = x;
-  for (int i = 0; i < rv_num_lanes(); ++i) {
-    const T v = intrin_extract(x, (offset + i) % rv_num_lanes());
-    ret = intrin_insert(ret, i, v);
-  }
-  return ret;
-  #else
   return apply_on_data(x, [offset](const float data) {
     float ret = data;
+#pragma unroll
     for (int i = 0; i < rv_num_lanes(); ++i) {
       const float v = rv_extract(data, (offset + i) % rv_num_lanes());
       ret = rv_insert(ret, i, v);
     }
     return ret;
   });
-  #endif
 }
+
 template <typename T> T shuffle_xor_impl(T x, int lane_mask) {
-  #ifndef HIPSYCL_RV_LEGACY
   T ret = x;
+#pragma unroll
   for (int i = 0; i < rv_num_lanes(); ++i) {
     int idx = (lane_mask ^ i) & (rv_num_lanes() - 1);
     const T v = intrin_extract(x, idx);
     ret = intrin_insert(ret, i, v);
   }
   return ret;
-  #else
-  return apply_on_data(x, [lane_mask](const float data) {
-    float ret = data;
-    for (int i = 0; i < rv_num_lanes(); ++i) {
-      int idx = (lane_mask ^ i) & (rv_num_lanes() - 1);
-      const float v = rv_extract(data, idx);
-      ret = rv_insert(ret, i, v);
-    }
-    return ret;
-  });
-  #endif
 }
 
 } // namespace detail
