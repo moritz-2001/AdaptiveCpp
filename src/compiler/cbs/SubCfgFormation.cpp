@@ -1707,9 +1707,7 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
     }
     IndVar->eraseFromParent();
   }
-
   assert(!llvm::verifyFunction(F, &llvm::errs()) && "Function verification failed");
-  HIPSYCL_DEBUG_EXECUTE_ERROR(F.viewCFG();)
 }
 
 void createLoopsAroundKernel(llvm::Function &F, llvm::DominatorTree &DT, llvm::LoopInfo &LI,
