@@ -70,6 +70,9 @@
   using namespace detail;                                                      \
   HIPSYCL_DISPATCH_BUILTIN(name, __VA_ARGS__);
 
+#include "host/rv_shuffle.h"
+#include "host/subgroup_functions.hpp"
+
 namespace hipsycl {
 namespace sycl {
 

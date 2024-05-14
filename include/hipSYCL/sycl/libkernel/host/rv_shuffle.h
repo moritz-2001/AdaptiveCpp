@@ -7,16 +7,18 @@ namespace hipsycl {
 namespace sycl {
 
 namespace detail {
-
 // template <class T>
 // T intrin_extract(T, std::uint32_t);
 
-#define MANGLED_VARIANTS(TYPE, BackupType, MangleSuffix)                                   \
-  HIPSYCL_FORCE_INLINE TYPE intrin_extract(TYPE vec, std::uint32_t idx) {                           \
-    return static_cast<TYPE>(rv_extract_##MangleSuffix(static_cast<BackupType>(vec), idx));                                \
-  }                                                                            \
-  HIPSYCL_FORCE_INLINE TYPE intrin_insert(TYPE vec, std::uint32_t idx, TYPE val) {                  \
-    return static_cast<TYPE>(rv_insert_##MangleSuffix(static_cast<BackupType>(vec), idx, val));                            \
+#define MANGLED_VARIANTS(TYPE, BackupType, MangleSuffix)                                           \
+  HIPSYCL_FORCE_INLINE TYPE intrin_extract(TYPE vec, std::uint32_t idx) {                          \
+    return static_cast<TYPE>(rv_extract_##MangleSuffix(static_cast<BackupType>(vec), idx));        \
+  }                                                                                                \
+  HIPSYCL_FORCE_INLINE TYPE intrin_insert(TYPE vec, std::uint32_t idx, TYPE val) {                 \
+    return static_cast<TYPE>(rv_insert_##MangleSuffix(static_cast<BackupType>(vec), idx, val));    \
+  }                                                                                                \
+  HIPSYCL_FORCE_INLINE TYPE intrin_shuffle(TYPE vec, std::uint32_t idx, TYPE val) {                \
+    return static_cast<TYPE>(rv_shuffle_##MangleSuffix(static_cast<BackupType>(vec), idx));        \
   }
 
 MANGLED_VARIANTS(float, float, f)
@@ -32,29 +34,25 @@ MANGLED_VARIANTS(std::uint32_t, std::int32_t, i32)
 MANGLED_VARIANTS(std::uint64_t, std::int64_t, i64)
 MANGLED_VARIANTS(unsigned long long, std::int64_t, i64)
 
-template <size_t SizeOfT>
-void copy_bits(std::uint8_t *tgtPtr, const std::uint8_t *ptr) {
+template <size_t SizeOfT> void copy_bits(std::uint8_t *tgtPtr, const std::uint8_t *ptr) {
 #pragma unroll
   for (int i = 0; i < SizeOfT; ++i)
     tgtPtr[i] = ptr[i];
 }
 
-template <typename T, size_t Words>
-void copy_bits(std::array<float, Words> &words, T &&x) {
+template <typename T, size_t Words> void copy_bits(std::array<float, Words> &words, T &&x) {
   copy_bits<sizeof(T)>(reinterpret_cast<std::uint8_t *>(words.data()),
                        reinterpret_cast<std::uint8_t *>(&x));
 }
 
-template <typename T, size_t Words>
-void copy_bits(T &tgt, const std::array<float, Words> &words) {
+template <typename T, size_t Words> void copy_bits(T &tgt, const std::array<float, Words> &words) {
   copy_bits<sizeof(T)>(reinterpret_cast<std::uint8_t *>(&tgt),
                        reinterpret_cast<const std::uint8_t *>(words.data()));
 }
 
 template <typename T, typename Operation> T apply_on_data(T x, Operation &&op) {
   // roundUp(sizeof(T) / sizeof(float))
-  constexpr std::size_t words_no =
-      (sizeof(T) + sizeof(float) - 1) / sizeof(float);
+  constexpr std::size_t words_no = (sizeof(T) + sizeof(float) - 1) / sizeof(float);
 
   std::array<float, words_no> words;
   copy_bits(words, x);
@@ -77,7 +75,7 @@ template <typename T> HIPSYCL_FORCE_INLINE T shuffle_impl(T x, int id) {
     float ret = data;
 #pragma unroll
     for (int i = 0; i < rv_num_lanes(); ++i) {
-      const int srcLane = rv_extract(id, i);
+      const auto srcLane = rv_extract(id, i);
       const float v = rv_extract(data, srcLane);
       ret = rv_insert(ret, i, v);
     }
@@ -85,9 +83,54 @@ template <typename T> HIPSYCL_FORCE_INLINE T shuffle_impl(T x, int id) {
   });
 }
 
+template <typename T> HIPSYCL_FORCE_INLINE T swap(T vector, uint32_t i, uint32_t j) {
+  const auto ithLaneV = rv_extract(vector, i);
+  const auto jthLaneV = rv_extract(vector, j);
+  vector = rv_insert(vector, j, ithLaneV);
+  vector = rv_insert(vector, i, jthLaneV);
+  return vector;
+}
+
+template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t rv_partition(T& x, Pred pred) {
+  size_t j = 0; // All element in [0, j) fullfill pred.
+  T copyX = x;
+#pragma unroll
+  for (uint32_t i = 0; i < rv_num_lanes(); ++i) {
+    const auto v = rv_extract(copyX, i);
+    if (pred(v)) {
+      x = swap(x, j, i);
+      ++j;
+    }
+  }
+  return j;
+}
+
+template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t rv_count_if(T x, Pred pred) {
+  size_t j = 0;
+#pragma unroll
+  for (uint32_t i = 0; i < rv_num_lanes(); ++i) {
+      const auto v = rv_extract(x, i);
+      if (pred(v)) {
+        ++j;
+      }
+  }
+  return j;
+}
+
+template <typename T, typename Pred> HIPSYCL_FORCE_INLINE int rv_find_if(T x, Pred pred) {
+  int j = -1;
+#pragma unroll
+  for (int i = rv_num_lanes()-1; i >= 0; --i) {
+    const auto v = rv_extract(x, i);
+    if (pred(v)) {
+      j = i;
+    }
+  }
+  return j;
+}
+
 template <typename T> HIPSYCL_FORCE_INLINE T extract_impl(T x, int id) {
-  return apply_on_data(x,
-                       [id](const float data) { return rv_extract(data, id); });
+  return apply_on_data(x, [id](const float data) { return rv_extract(data, id); });
 }
 
 template <typename T> HIPSYCL_FORCE_INLINE T shuffle_up_impl(T x, int offset) {
@@ -95,25 +138,23 @@ template <typename T> HIPSYCL_FORCE_INLINE T shuffle_up_impl(T x, int offset) {
     float ret = data;
 #pragma unroll
     for (int i = 0; i < rv_num_lanes(); ++i) {
-      const float v =
-          rv_extract(data, (rv_num_lanes() - offset + i) % rv_num_lanes());
+      const float v = rv_extract(data, (rv_num_lanes() - offset + i) % rv_num_lanes());
       ret = rv_insert(ret, i, v);
     }
     return ret;
   });
 }
 
-template <typename T>
-HIPSYCL_FORCE_INLINE T shuffle_down_impl(T x, int offset) {
-  return apply_on_data(x, [offset](const float data) {
-    float ret = data;
-#pragma unroll
-    for (int i = 0; i < rv_num_lanes(); ++i) {
-      const float v = rv_extract(data, (offset + i) % rv_num_lanes());
-      ret = rv_insert(ret, i, v);
-    }
-    return ret;
-  });
+template <typename T> HIPSYCL_FORCE_INLINE T shuffle_down_impl(T x, int offset) {
+    return apply_on_data(x, [offset](const float data) {
+      float ret = data;
+//  #pragma unroll
+      for (int i = 0; i < rv_num_lanes(); ++i) {
+        const float v = rv_extract(data, (offset + i) % rv_num_lanes());
+        ret = rv_insert(ret, i, v);
+      }
+      return ret;
+    });
 }
 
 template <typename T> T shuffle_xor_impl(T x, int lane_mask) {
@@ -128,8 +169,6 @@ template <typename T> T shuffle_xor_impl(T x, int lane_mask) {
 }
 
 } // namespace detail
-
 } // namespace sycl
 } // namespace hipsycl
-
-#endif //RV_SHUFFLE_H
+#endif // RV_SHUFFLE_H

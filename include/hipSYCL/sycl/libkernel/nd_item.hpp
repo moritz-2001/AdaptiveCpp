@@ -62,7 +62,6 @@ struct nd_item
   /* -- common interface members -- */
   static constexpr int dimensions = Dimensions;
   // TODO
-  static constexpr uint32_t SGSize = 32;
 
   HIPSYCL_KERNEL_TARGET
   id<Dimensions> get_global_id() const
