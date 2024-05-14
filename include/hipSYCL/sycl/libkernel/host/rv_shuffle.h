@@ -136,7 +136,7 @@ template <typename T> HIPSYCL_FORCE_INLINE T extract_impl(T x, int id) {
 template <typename T> HIPSYCL_FORCE_INLINE T shuffle_up_impl(T x, int offset) {
   return apply_on_data(x, [offset](const float data) {
     float ret = data;
-#pragma unroll
+    #pragma unroll
     for (int i = 0; i < rv_num_lanes(); ++i) {
       const float v = rv_extract(data, (rv_num_lanes() - offset + i) % rv_num_lanes());
       ret = rv_insert(ret, i, v);
@@ -148,7 +148,7 @@ template <typename T> HIPSYCL_FORCE_INLINE T shuffle_up_impl(T x, int offset) {
 template <typename T> HIPSYCL_FORCE_INLINE T shuffle_down_impl(T x, int offset) {
     return apply_on_data(x, [offset](const float data) {
       float ret = data;
-//  #pragma unroll
+ #pragma unroll
       for (int i = 0; i < rv_num_lanes(); ++i) {
         const float v = rv_extract(data, (offset + i) % rv_num_lanes());
         ret = rv_insert(ret, i, v);
