@@ -1,0 +1,97 @@
+#ifndef SUBGROUP_FUNCTIONS_HPP
+#define SUBGROUP_FUNCTIONS_HPP
+
+#include "group_functions.hpp"
+#include "rv_shuffle.h"
+#include "../backend.hpp"
+#include "../detail/data_layout.hpp"
+#include "../detail/mem_fence.hpp"
+#include "../functional.hpp"
+#include "../group.hpp"
+#include "../id.hpp"
+#include "../sub_group.hpp"
+#include "../vec.hpp"
+
+namespace hipsycl {
+namespace sycl {
+
+template <typename T> HIPSYCL_FORCE_INLINE int dot_product(sub_group sg, T a, T b) {
+  T c = a*b;
+  return detail::host_builtins::__hipsycl_reduce_over_group(sg, c, plus<T>{});
+}
+
+template <typename T> HIPSYCL_FORCE_INLINE float median(sub_group sg, T a) {
+  return detail::host_builtins::__hipsycl_reduce_over_group(sg, a, plus<T>{}) / (float) sg.get_local_linear_range();
+}
+
+
+template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t find_if(sub_group sg, T a, Pred pred) {
+#ifdef RV
+  return detail::rv_find_if(a, pred);
+#else
+  T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
+  scratch[sg.get_local_linear_id()] = a;
+  detail::host_builtins::__hipsycl_group_barrier(sg);
+  int j = -1;
+  if (sg.leader()) {
+    for (auto i = 0; i < sg.get_local_linear_range(); ++i) {
+      if (pred(scratch[i])) {
+        j = i;
+        break;
+      }
+    }
+  }
+  return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
+#endif
+}
+
+template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t count_if(sub_group sg, T a, Pred pred) {
+#ifdef RV
+  return detail::rv_count_if(a, pred);
+#else
+  T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
+  scratch[sg.get_local_linear_id()] = a;
+  detail::host_builtins::__hipsycl_group_barrier(sg);
+  int j = 0;
+  if (sg.leader()) {
+    for (auto i = 0; i < sg.get_local_linear_range(); ++i) {
+      if (pred(scratch[i])) {
+        ++j;
+      }
+    }
+  }
+  return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
+#endif
+}
+
+template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t partition(sub_group sg, T& a, Pred pred) {
+#ifdef RV
+    return detail::rv_partition(a, pred);
+#else
+  T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
+  scratch[sg.get_local_linear_id()] = a;
+
+  detail::host_builtins::__hipsycl_group_barrier(sg);
+  int j = 0;
+  if (sg.leader()) {
+    for (auto i = 0; i < sg.get_local_linear_range(); ++i) {
+      if (pred(scratch[i])) {
+          std::swap(scratch[i], scratch[j]);
+          ++j;
+      }
+    }
+  }
+  detail::host_builtins::__hipsycl_group_barrier(sg);
+  a = scratch[sg.get_local_linear_id()];
+  detail::host_builtins::__hipsycl_group_barrier(sg);
+  return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
+#endif
+}
+
+
+
+
+}
+}
+
+#endif //SUBGROUP_FUNCTIONS_HPP
