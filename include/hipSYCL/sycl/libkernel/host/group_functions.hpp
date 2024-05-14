@@ -70,11 +70,7 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x, BinaryOperatio
   const std::size_t local_range = g.get_local_linear_range();
   sub_group sg = g.get_sub_group();
 
-  //scratch[lid] = x;
-  //__hipsycl_group_barrier(g);
-
   scratch[lid] = reduce_over_group(sg, x, binary_op);
-
 
   __hipsycl_group_barrier(g); // as this starts a new loop with CBS,
                               // LLVM detects it's actually just one iteration and optimizes it
@@ -93,7 +89,6 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x, BinaryOperatio
 
   return x;
 }
-
 } // namespace detail
 
 // broadcast
@@ -420,33 +415,54 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(group<Dim> g, T x, BinaryOpe
 
 template <typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
-  /*
 #ifdef RV
-  const size_t lid = g.get_local_linear_id();
-  const unsigned int activemask = rv_ballot(rv_mask());
-
-  auto local_x = x;
+  //const size_t lid = g.get_local_linear_id();
+  auto local_x = 0;
 #pragma unroll
-  for (size_t i = rv_num_lanes() / 2; i > 0; i /= 2) {
-    auto other_x = sycl::detail::shuffle_down_impl(local_x, i);
-    if (activemask & (1 << (lid + i)))
-      local_x = binary_op(local_x, other_x);
+  for (size_t i = 0; i < g.get_local_linear_range(); ++i) {
+    const auto v = rv_extract(x, i);
+    local_x = binary_op(local_x, v);
   }
-  return sycl::detail::extract_impl(local_x, 0);
+
+  //const unsigned int activemask = rv_ballot(rv_mask());
+  //auto local_x = x;
+  //#pragma unroll
+  //for (size_t i = rv_num_lanes() / 2; i > 0; i /= 2) {
+  //  auto other_x = sycl::detail::shuffle_down_impl(local_x, i);
+  //  if (activemask & (1 << (lid + i)))
+  //    local_x = binary_op(local_x, other_x);
+  //}
+  return extract_impl(local_x, 0);
 #else
-*/
-  const size_t lid = g.get_local_linear_id();
-  const size_t lrange = g.get_local_linear_range();
+  T* scratch = static_cast<T*>(g.get_local_memory_ptr());
+  scratch[g.get_local_linear_id()] = x;
 
-  auto local_x = x;
+  __hipsycl_group_barrier(g);
 
-  for (size_t i = lrange / 2; i > 0; i /= 2) {
-    auto other_x = __hipsycl_shift_group_left(g, local_x, i);
-    local_x = binary_op(local_x, other_x);
+  //auto local_x = x;
+ // //for (size_t i = g.get_local_linear_range() / 2; i > 0; i /= 2) {
+  //auto other_x = __hipsycl_shift_group_left(g, local_x, i);
+  //local_x = binary_op(local_x, other_x);
+  //}
+
+  if (g.leader()) {
+    for (size_t i = g.get_local_linear_range() / 2; i > 0; i /= 2) {
+      for (size_t j = 0; j < i;  j++) {
+        scratch[j] = binary_op(scratch[j], scratch[i+j]);
+      }
+    }
   }
 
-  return __hipsycl_group_broadcast(g, local_x, 0);
-//#endif
+
+    //for (auto i = 1; i < g.get_local_linear_range(); ++i) {
+    //  x = binary_op(x, scratch[i]);
+    //}
+    //scratch[0] = x;
+  //}
+
+  __hipsycl_group_barrier(g);
+  return scratch[0];
+#endif
 }
 
 // exclusive_scan
@@ -686,7 +702,7 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_left(group<Dim> g, T x,
     target_lid = 0;
 
   x = scratch[target_lid];
-  __hipsycl_group_barrier(g);
+  //__hipsycl_group_barrier(g);
 
   return x;
 }

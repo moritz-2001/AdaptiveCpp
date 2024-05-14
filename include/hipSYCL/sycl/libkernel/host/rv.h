@@ -18,6 +18,9 @@ extern "C" float rv_insert(float, std::uint32_t, float);
 extern "C" float rv_shuffle(float, std::int32_t);
 // extern "C" void rv_align(void*, std::int32_t);
 
+//template<typename T>
+//extern "C" T rv_extract(T, std::uint32_t);
+
 #define MANGLED_VARIANTS(Type, MangleSuffix)                                                       \
   extern "C" Type rv_extract_##MangleSuffix(Type, std::uint32_t);                                  \
   extern "C" Type rv_insert_##MangleSuffix(Type, std::uint32_t, Type);                             \
