@@ -41,7 +41,7 @@ class AssumptionCache;
 namespace hipsycl::compiler {
 static constexpr size_t NumArrayElements = 1024;
 static constexpr size_t DefaultAlignment = 64;
-static constexpr size_t SGSize = 32;
+static constexpr size_t SGSize = 1;
 struct MDKind {
   static constexpr const char Arrayified[] = "hipSYCL.arrayified";
   static constexpr const char InnerLoop[] = "hipSYCL.loop.inner";
