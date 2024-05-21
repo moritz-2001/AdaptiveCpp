@@ -417,9 +417,9 @@ template <typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
 #ifdef RV
   //const size_t lid = g.get_local_linear_id();
-  auto local_x = 0;
+  auto local_x = rv_extract(x, 0);
 #pragma unroll
-  for (size_t i = 0; i < g.get_local_linear_range(); ++i) {
+  for (size_t i = 1; i < g.get_local_linear_range(); ++i) {
     const auto v = rv_extract(x, i);
     local_x = binary_op(local_x, v);
   }
@@ -624,20 +624,31 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_inclusive_scan_over_group(sub_group g, T x,
 #ifdef RV
   const size_t       lid        = g.get_local_linear_id();
   const size_t       lrange     = g.get_local_linear_range();
-  const unsigned int activemask = rv_ballot(rv_mask());
+  //const unsigned int activemask = rv_ballot(rv_mask());
 
   auto local_x = x;
 
   for (size_t i = 1; i < lrange; i *= 2) {
-    size_t next_id = lid - i;
-    if (i > lid)
-      next_id = 0;
+    auto other_x = shuffle_up_impl(local_x, i);
 
-    auto other_x = shuffle_impl(local_x, next_id);
-    if (activemask & (1 << (next_id)) && i <= lid && lid < lrange)
+    //activemask & (1 << (next_id)) &&
+    if ( i <= lid && lid < lrange)
       local_x = binary_op(local_x, other_x);
   }
   return local_x;
+
+  /*
+  const size_t       lrange     = g.get_local_linear_range();
+  for (size_t i = 1; i < lrange; ++i) {
+    const auto eInFront = rv_extract(x, i-1);
+    const auto e = rv_extract(x, i);
+    auto res = binary_op(eInFront, e);
+    rv_insert(x, i, res);
+  }
+
+  return x;
+  */
+
 #else
   T *scratch = static_cast<T *>(g.get_local_memory_ptr());
   const size_t lid = g.get_local_linear_id();
@@ -677,14 +688,14 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_inclusive_scan_over_group(group<Dim> g, T x,
 
   if (g.leader()) {
     for (auto i = 1ul; i < g.get_local_linear_range() / sg.get_local_linear_range(); ++i) {
-      scratch[i] += scratch[i-1];
+      scratch[i] = binary_op(scratch[i-1], scratch[i]);
     }
   }
   __hipsycl_group_barrier(g);
 
   // Not the first sub-group
   if (g.get_local_linear_id() >= sg.get_local_linear_range()) {
-    x += scratch[g.get_local_linear_id() / sg.get_local_linear_range() - 1];
+    x = binary_op(scratch[g.get_local_linear_id() / sg.get_local_linear_range() - 1], x);
   }
   __hipsycl_group_barrier(g);
   return x;
