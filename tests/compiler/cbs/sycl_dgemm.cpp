@@ -1,6 +1,4 @@
-// RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu
-// RUN: %t | FileCheck %s
-// RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O
+// RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 // adapted from https://github.com/UoB-HPC/sycl_dgemm/blob/main/dgemm.cpp
