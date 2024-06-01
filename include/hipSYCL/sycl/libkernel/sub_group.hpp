@@ -41,13 +41,13 @@
 #endif
 
 #define HIERACHICAL
-//#define RV
+#define RV
 
 #if defined(RV)
 #include "host/rv.h"
 #endif
 
-constexpr size_t SGSize = 1;
+constexpr size_t SGSize = 16;
 
 
 namespace hipsycl {

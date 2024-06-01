@@ -9,13 +9,28 @@ extern "C" std::uint32_t rv_ballot(bool);
 extern "C" std::uint32_t rv_popcount(bool);
 extern "C" std::uint32_t rv_index(bool);
 extern "C" bool rv_mask();
-// rv_compact(float V, bool M)
 extern "C" std::uint32_t rv_lane_id();
 extern "C" std::uint32_t rv_num_lanes();
-extern "C" float rv_extract(float, std::uint32_t);
-extern "C" float rv_insert(float, std::uint32_t, float);
-// extern "C" float rv_store(float*);
-extern "C" float rv_shuffle(float, std::int32_t);
+
+
+template<typename T>
+T rv_shuffle(T, std::int32_t);
+
+template<typename T>
+T rv_extract(T, std::uint32_t);
+
+template<typename T>
+T rv_insert(T, std::uint32_t, T);
+
+template<typename T>
+T rv_reduce(T, int);
+
+
+template<typename T>
+T extract(T, uint32_t);
+
+
+
 // extern "C" void rv_align(void*, std::int32_t);
 
 //template<typename T>

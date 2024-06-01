@@ -176,6 +176,7 @@ hipsycl::compiler::LoopsParallelMarkerPass::run(llvm::Function &F,
     llvm::AttrBuilder B{F.getContext()};
     B.addAttribute(llvm::Attribute::get(F.getContext(), "iskernel", std::to_string(SGSize)));
     F.addFnAttrs(B);
+    F.addFnAttr(llvm::Attribute::NoInline);
   }
 
   return llvm::PreservedAnalyses::all();

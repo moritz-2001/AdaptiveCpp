@@ -20,12 +20,7 @@ template <typename T> HIPSYCL_FORCE_INLINE int dot_product(sub_group sg, T a, T 
   return detail::host_builtins::__hipsycl_reduce_over_group(sg, c, plus<T>{});
 }
 
-template <typename T> HIPSYCL_FORCE_INLINE float median(sub_group sg, T a) {
-  return detail::host_builtins::__hipsycl_reduce_over_group(sg, a, plus<T>{}) / (float) sg.get_local_linear_range();
-}
-
-
-template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t find_if(sub_group sg, T a, Pred pred) {
+template <typename T, typename Pred> HIPSYCL_FORCE_INLINE int find_if(sub_group sg, T a, Pred pred) {
 #ifdef RV
   return detail::rv_find_if(a, pred);
 #else
@@ -46,6 +41,9 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t find_if(sub_g
 }
 
 template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t count_if(sub_group sg, T a, Pred pred) {
+  uint32_t x = pred(a) ? 1 : 0;
+  return detail::host_builtins::__hipsycl_reduce_over_group(sg, x, sycl::plus<uint32_t>{});
+/*
 #ifdef RV
   return detail::rv_count_if(a, pred);
 #else
@@ -62,6 +60,7 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t count_if(sub_
   }
   return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
 #endif
+*/
 }
 
 template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t partition(sub_group sg, T& a, Pred pred) {
@@ -87,8 +86,6 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t partition(sub
   return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
 #endif
 }
-
-
 
 
 }
