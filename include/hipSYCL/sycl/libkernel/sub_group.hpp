@@ -47,7 +47,7 @@
 #include "host/rv.h"
 #endif
 
-constexpr size_t SGSize = 16;
+constexpr size_t SGSize = 32;
 
 
 namespace hipsycl {
