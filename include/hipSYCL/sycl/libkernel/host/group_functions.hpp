@@ -452,37 +452,40 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(group<Dim> g, T x, BinaryOpe
 template <typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
 #ifdef RV
-  if constexpr (std::is_same_v<BinaryOperation, plus<T>>) {
-    return rv_reduce<T>(x, 0);
-  } else if constexpr (std::is_same_v<BinaryOperation, multiplies<T>>) {
-    return rv_reduce<T>(x, 1);
-  } else if constexpr (std::is_same_v<BinaryOperation, minimum<T>>) {
-    // TODO signed vs unsigned
-    return rv_reduce<T>(x, 2);
-  } else if constexpr (std::is_same_v<BinaryOperation, maximum<T>>) {
-    // TODO signed vs unsigned
-    return rv_reduce<T>(x, 3);
+  if constexpr (std::is_integral_v<T>) {
+    if constexpr (std::is_same_v<BinaryOperation, plus<T>>) {
+      return rv_reduce<T>(x, 0);
+    } else if constexpr (std::is_same_v<BinaryOperation, multiplies<T>>) {
+      return rv_reduce<T>(x, 1);
+    } else if constexpr (std::is_same_v<BinaryOperation, minimum<T>>) {
+      // TODO signed vs unsigned
+      return rv_reduce<T>(x, 2);
+    } else if constexpr (std::is_same_v<BinaryOperation, maximum<T>>) {
+      // TODO signed vs unsigned
+      return rv_reduce<T>(x, 3);
+    }
   }
 
-  assert(false);
-  return T{};
-
+/*
   auto local_x = rv_extract(x, 0);
-//#pragma unroll
+  #pragma unroll
   for (size_t i = 1; i < g.get_local_linear_range(); ++i) {
     const auto v = rv_extract(x, i);
     local_x = binary_op(local_x, v);
   }
+  return local_x;
+  */
 
-  //const unsigned int activemask = rv_ballot(rv_mask());
-  //auto local_x = x;
-  //#pragma unroll
-  //for (size_t i = rv_num_lanes() / 2; i > 0; i /= 2) {
-  //  auto other_x = sycl::detail::shuffle_down_impl(local_x, i);
-  //  if (activemask & (1 << (lid + i)))
-  //    local_x = binary_op(local_x, other_x);
-  //}
-  return extract_impl(local_x, 0);
+
+  auto local_x = x;
+  #pragma unroll
+  for (size_t i = rv_num_lanes() / 2; i > 0; i /= 2) {
+    auto other_x = __hipsycl_shift_group_left(g, local_x, i);
+    local_x = binary_op(local_x, other_x);
+  }
+  return __hipsycl_group_broadcast(g, local_x, 0);
+
+
 #else
   T* scratch = static_cast<T*>(g.get_local_memory_ptr());
   scratch[g.get_local_linear_id()] = x;
