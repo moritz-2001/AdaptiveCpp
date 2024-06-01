@@ -76,7 +76,7 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x, BinaryOperatio
                               // LLVM detects it's actually just one iteration and optimizes it
 
   if (g.leader()) {
-    auto y = 0;
+    T y{};
     // #pragma clang loop vectorize_width(1)
     for (auto i = 0; i < local_range; i += sg.get_local_linear_range())
       y = binary_op(y, scratch[i]);
