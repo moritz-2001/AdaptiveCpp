@@ -45,6 +45,14 @@
 namespace hipsycl::compiler::utils {
 using namespace hipsycl::compiler::cbs;
 
+bool isExtractIntrinsic(const llvm::Function* F) {
+  if (not F) {
+    return false;
+  }
+  return F->getName().contains("extract");
+}
+
+
 llvm::Loop *updateDtAndLi(llvm::LoopInfo &LI, llvm::DominatorTree &DT, const llvm::BasicBlock *B,
                           llvm::Function &F) {
   DT.reset();
@@ -52,6 +60,32 @@ llvm::Loop *updateDtAndLi(llvm::LoopInfo &LI, llvm::DominatorTree &DT, const llv
   LI.releaseMemory();
   LI.analyze(DT);
   return LI.getLoopFor(B);
+}
+
+void eraseUseChain(llvm::Value *V) {
+  llvm::SmallPtrSet<llvm::Instruction *, 8> ToErase{};
+  llvm::SmallVector<llvm::Instruction *, 8> WorkList{};
+
+  auto AddAllUsersToWorkList = [&WorkList](llvm::Value *V) {
+    for (auto *U : V->users()) {
+      if (auto *I = llvm::dyn_cast<llvm::Instruction>(U)) {
+        WorkList.emplace_back(I);
+      }
+    }
+  };
+
+  AddAllUsersToWorkList(V);
+
+  while (not WorkList.empty()) {
+    // Insertion took place
+    if (auto *I = WorkList.pop_back_val(); ToErase.insert(I).second) {
+      AddAllUsersToWorkList(I);
+    }
+  }
+
+  for (auto *I : ToErase) {
+    I->eraseFromParent();
+  }
 }
 
 bool isBarrier(const llvm::Instruction *I, const SplitterAnnotationInfo &SAA) {

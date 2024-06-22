@@ -100,8 +100,12 @@ template <class PtrSet> struct PtrSetWrapper {
   auto begin() -> decltype(Set.begin()) { return Set.begin(); }
 };
 
+bool isExtractIntrinsic(const llvm::Function* F);
+
 llvm::Loop *updateDtAndLi(llvm::LoopInfo &LI, llvm::DominatorTree &DT, const llvm::BasicBlock *B,
                           llvm::Function &F);
+
+void eraseUseChain(llvm::Value *V);
 
 bool isBarrier(const llvm::Instruction *I, const SplitterAnnotationInfo &SAA);
 bool blockHasBarrier(const llvm::BasicBlock *BB,

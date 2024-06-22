@@ -12,6 +12,11 @@ extern "C" bool rv_mask();
 extern "C" std::uint32_t rv_lane_id();
 extern "C" std::uint32_t rv_num_lanes();
 
+#ifdef RV
+static constexpr bool isRV = true;
+#else
+static constexpr bool isRV = false;
+#endif
 
 template<typename T>
 T rv_shuffle(T, std::int32_t);
@@ -25,9 +30,46 @@ T rv_insert(T, std::uint32_t, T);
 template<typename T>
 T rv_reduce(T, int);
 
-
 template<typename T>
 T extract(T, uint32_t);
+
+
+
+/*
+0: +
+1: *
+2: min
+3: max
+ */
+template<typename  T>
+T __cbs_reduce(T, int);
+
+
+template<typename  T>
+T __cbs_shift_left(T, uint64_t i);
+
+template<typename  T>
+T __cbs_shift_right(T, uint64_t i);
+
+template<typename  T>
+T __cbs_shuffle(T, uint64_t i);
+
+template<typename  T>
+T __cbs_broadcast(T, uint64_t i);
+
+template<typename T>
+T __cbs_extract(T, uint32_t);
+
+
+
+template<typename T>
+T __reduce(T x, int i) {
+  if constexpr (isRV) {
+    return rv_reduce<T>(x, i);
+  } else {
+    return __cbs_reduce(x, i);
+  }
+}
 
 
 

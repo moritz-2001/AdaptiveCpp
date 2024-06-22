@@ -38,12 +38,15 @@
 #include "../vec.hpp"
 #include "hipSYCL/sycl/libkernel/host/host_backend.hpp"
 #include "rv_shuffle.h"
+#include <cstddef>
 #include <type_traits>
 
 #if HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_HOST
 
 namespace hipsycl {
 namespace sycl::detail::host_builtins {
+
+
 
 // barrier
 template <int Dim>
@@ -61,6 +64,13 @@ __hipsycl_group_barrier(sub_group g, memory_scope fence_scope = sub_group::fence
   // doesn't need sync
 }
 
+template<typename Group>
+void cond_barrier(Group g) {
+  if constexpr (not isRV) {
+    __hipsycl_group_barrier(g);
+  }
+}
+
 namespace detail {
 // reduce implementation
 template <int Dim, typename T, typename BinaryOperation>
@@ -70,7 +80,12 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x, BinaryOperatio
   const std::size_t local_range = g.get_local_linear_range();
   sub_group sg = g.get_sub_group();
 
-  scratch[lid] = reduce_over_group(sg, x, binary_op);
+  //T yl = extract(x, g.get_local_linear_id());
+  T result = reduce_over_group(sg, x, binary_op);
+
+  if (sg.leader()) {
+    scratch[g.get_local_linear_id()] = result;
+  }
 
   __hipsycl_group_barrier(g); // as this starts a new loop with CBS,
                               // LLVM detects it's actually just one iteration and optimizes it
@@ -78,16 +93,17 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x, BinaryOperatio
   if (g.leader()) {
     T y{};
     // #pragma clang loop vectorize_width(1)
-    for (auto i = 0; i < local_range; i += sg.get_local_linear_range())
-      y = binary_op(y, scratch[i]);
+    for (uint32_t j = 0u; j < local_range; j += sg.get_local_linear_range()) {
+       y = binary_op(y, scratch[j]);
+    }
     scratch[0] = y;
   }
 
   __hipsycl_group_barrier(g);
-  x = scratch[0];
+  T endResult = scratch[0];
   __hipsycl_group_barrier(g);
 
-  return x;
+  return endResult;
 }
 } // namespace detail
 
@@ -95,17 +111,9 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x, BinaryOperatio
 template <int Dim, typename T>
 HIPSYCL_KERNEL_TARGET T __hipsycl_group_broadcast(
     group<Dim> g, T x, typename group<Dim>::linear_id_type local_linear_id = 0) {
-  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
-  const size_t lid = g.get_local_linear_id();
-
-  if (lid == local_linear_id) {
-    scratch[0] = x;
-  }
-
   __hipsycl_group_barrier(g);
-  T tmp = scratch[0];
+  T tmp = extract(x, local_linear_id);
   __hipsycl_group_barrier(g);
-
   return tmp;
 }
 
@@ -121,22 +129,22 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_right(sub_group g, T x,
   }
   return ret;
 #else
-  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+  //T *scratch = static_cast<T *>(g.get_local_memory_ptr());
 
-  auto lid = g.get_local_linear_id();
-  int target_lid = lid - delta;
-  scratch[lid] = x;
+  //auto lid = g.get_local_linear_id();
+  //int target_lid = lid - delta;
+  //scratch[lid] = x;
+
+  __hipsycl_group_barrier(g);
+  auto y = __cbs_shift_right(x, delta);
+  //if (target_lid < 0)
+  //  target_lid = g.get_local_range().size() - 1;
+
+  //x = scratch[target_lid];
 
   __hipsycl_group_barrier(g);
 
-  if (target_lid < 0)
-    target_lid = g.get_local_range().size()-1;
-
-  x = scratch[target_lid];
-
-  __hipsycl_group_barrier(g);
-
-  return x;
+  return y;
 #endif
 }
 
@@ -153,18 +161,22 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_broadcast(sub_group g, T x,
 #ifdef RV
   return rv_extract(x, local_id);
 #else
+  __hipsycl_group_barrier(g);
+  if constexpr (std::is_integral_v<T>) {
+  T tmp = __cbs_broadcast(x, local_id);
+    __hipsycl_group_barrier(g);
+    return tmp;
+  } else {
+    T* scratch = static_cast<T*>(g.get_local_memory_ptr());
 
-  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
-  const size_t lid = g.get_local_linear_id();
-  if (lid == local_id) {
-    scratch[0] = x;
+    if (g.get_local_linear_id() == local_id)
+      scratch[0] = x;
+
+    __hipsycl_group_barrier(g);
+    T y = scratch[0];
+    __hipsycl_group_barrier(g);
+    return y;
   }
-
-  __hipsycl_group_barrier(g);
-  T tmp = scratch[0];
-  __hipsycl_group_barrier(g);
-
-  return tmp;
 #endif
 }
 
@@ -181,19 +193,25 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_left(sub_group g, T x,
   return ret;
 #else
   __hipsycl_group_barrier(g);
-  //T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+  if constexpr (std::is_integral_v<T>) {
+    auto y = __cbs_shift_left(x, delta);
+    __hipsycl_group_barrier(g);
+    return y;
+  } else {
+    T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+    auto lid = g.get_local_linear_id();
+    auto target_lid = lid + delta;
 
-  auto lid = g.get_local_linear_id();
-  auto target_lid = lid + delta;
+    scratch[lid] = x;
 
-  if (target_lid >= g.get_local_range().size())
-    target_lid = 0;
+    if (target_lid >= g.get_local_range().size())
+      target_lid = 0;
 
-  T y = extract(x, target_lid);
-
-  __hipsycl_group_barrier(g);
-
-  return y;
+    __hipsycl_group_barrier(g);
+    T y = scratch[target_lid];
+    __hipsycl_group_barrier(g);
+    return y;
+  }
 #endif
 }
 
@@ -224,13 +242,14 @@ HIPSYCL_KERNEL_TARGET bool __hipsycl_joint_any_of(Group g, Ptr first, Ptr last, 
 }
 
 template <int Dim>
+
 HIPSYCL_KERNEL_TARGET inline bool __hipsycl_any_of_group(group<Dim> g, bool pred) {
 #ifdef RV
   bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
   return detail::__hipsycl_group_reduce(g, pred, [](bool x, bool y) { return x or y; }, scratch);
 #else
-//  bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
- // return detail::__hipsycl_group_reduce(g, pred, [](bool x, bool y) { return x or y; });
+  //  bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
+  // return detail::__hipsycl_group_reduce(g, pred, [](bool x, bool y) { return x or y; });
   bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
 
   scratch[0] = false;
@@ -300,7 +319,7 @@ HIPSYCL_KERNEL_TARGET bool __hipsycl_joint_all_of(Group g, Ptr first, Ptr last, 
 template <int Dim>
 HIPSYCL_KERNEL_TARGET inline bool __hipsycl_all_of_group(group<Dim> g, bool pred) {
   bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
- // detail::__hipsycl_group_reduce(g, pred, );
+  // detail::__hipsycl_group_reduce(g, pred, );
 
   scratch[0] = true;
   __hipsycl_group_barrier(g);
@@ -322,7 +341,7 @@ inline bool __hipsycl_all_of_group(sub_group g, bool pred) {
 #ifdef RV
   return rv_all(pred);
 #else
- // return detail::__hipsycl_group_reduce(g, pred, [](bool x, bool y) { return x and y; });
+  // return detail::__hipsycl_group_reduce(g, pred, [](bool x, bool y) { return x and y; });
   bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
   scratch[0] = true;
   __hipsycl_group_barrier(g);
@@ -448,73 +467,101 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(group<Dim> g, T x, BinaryOpe
   return tmp;
 }
 
-template <typename T, typename BinaryOperation>
-HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
-#ifdef RV
+template<typename BinaryOperation, typename T>
+constexpr int reduce_supported_op() {
   if constexpr (std::is_integral_v<T>) {
-    if constexpr (std::is_same_v<BinaryOperation, plus<T>>) {
-      return rv_reduce<T>(x, 0);
-    } else if constexpr (std::is_same_v<BinaryOperation, multiplies<T>>) {
-      return rv_reduce<T>(x, 1);
-    } else if constexpr (std::is_same_v<BinaryOperation, minimum<T>>) {
-      // TODO signed vs unsigned
-      return rv_reduce<T>(x, 2);
-    } else if constexpr (std::is_same_v<BinaryOperation, maximum<T>>) {
-      // TODO signed vs unsigned
-      return rv_reduce<T>(x, 3);
+    if constexpr (std::is_same_v<BinaryOperation, sycl::plus<T>>) {
+      return 0;
+    } else if constexpr (std::is_same_v<BinaryOperation, sycl::multiplies<T>>) {
+      return 1;
+    } else if constexpr (std::is_same_v<BinaryOperation, sycl::minimum<T>>) {
+      return 2;
+    } else if constexpr (std::is_same_v<BinaryOperation, sycl::maximum<T>>) {
+      return 3;
     }
   }
+  return -1;
+}
 
-/*
-  auto local_x = rv_extract(x, 0);
-  #pragma unroll
-  for (size_t i = 1; i < g.get_local_linear_range(); ++i) {
-    const auto v = rv_extract(x, i);
-    local_x = binary_op(local_x, v);
+template <typename T, typename BinaryOperation>
+HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
+  cond_barrier(g);
+  constexpr int op = reduce_supported_op<BinaryOperation, T>();
+  if constexpr (op >= 0) {
+    auto result = __reduce(x, op);
+    cond_barrier(g);
+    return result;
+  } else {
+    auto local_x = x;
+#pragma unroll
+    for (auto i = g.get_local_linear_range() / 2; i > 0; i /= 2) {
+      auto other_x = __hipsycl_shift_group_left(g, local_x, i);
+      local_x = binary_op(local_x, other_x);
+    }
+    return __hipsycl_group_broadcast(g, local_x, 0);
   }
-  return local_x;
-  */
+
+  /*
+    auto local_x = rv_extract(x, 0);
+    #pragma unroll
+    for (size_t i = 1; i < g.get_local_linear_range(); ++i) {
+      const auto v = rv_extract(x, i);
+      local_x = binary_op(local_x, v);
+    }
+    return local_x;
 
 
   auto local_x = x;
-  #pragma unroll
+#pragma unroll
   for (size_t i = rv_num_lanes() / 2; i > 0; i /= 2) {
     auto other_x = __hipsycl_shift_group_left(g, local_x, i);
     local_x = binary_op(local_x, other_x);
   }
   return __hipsycl_group_broadcast(g, local_x, 0);
 
-
 #else
-  T* scratch = static_cast<T*>(g.get_local_memory_ptr());
-  scratch[g.get_local_linear_id()] = x;
-
   __hipsycl_group_barrier(g);
 
   auto local_x = x;
-  for (size_t i = g.get_local_linear_range() / 2; i > 0; i /= 2) {
-    auto other_x = __hipsycl_shift_group_left(g, local_x, i);
+  __hipsycl_group_barrier(g);
+  T other_x{};
+  // #pragma unroll
+  for (size_t i = SGSize / 2; i > 0; i /= 2) {
+    __hipsycl_group_barrier(g);
+    other_x = __cbs_shift_left(local_x, i);
     local_x = binary_op(local_x, other_x);
+    __hipsycl_group_barrier(g);
   }
+  return local_x;
+  //return __hipsycl_group_broadcast(g, local_x, 0);
+  */
 
-  //if (g.leader()) {
-  //  for (size_t i = g.get_local_linear_range() / 2; i > 0; i /= 2) {
-  //    for (size_t j = 0; j < i;  j++) {
-  //      scratch[j] = binary_op(scratch[j], scratch[i+j]);
-  //    }
-  //  }
-  //}
+  /*
+  other_x = __cbs_shift_left(local_x, 16);
+  local_x = binary_op(local_x, other_x);
+  __hipsycl_group_barrier(g);
+  other_x = __cbs_shift_left(local_x, 8);
+  local_x = binary_op(local_x, other_x);
+  __hipsycl_group_barrier(g);
+  other_x = __cbs_shift_left(local_x, 4);
+  local_x = binary_op(local_x, other_x);
+  __hipsycl_group_barrier(g);
+  other_x = __cbs_shift_left(local_x, 2);
+  local_x = binary_op(local_x, other_x);
+  __hipsycl_group_barrier(g);
+  other_x = __cbs_shift_left(local_x, 1);
+  local_x = binary_op(local_x, other_x);
+
+  return __hipsycl_group_broadcast(g, local_x, 0);
 
 
-    //for (auto i = 1; i < g.get_local_linear_range(); ++i) {
-    //  x = binary_op(x, scratch[i]);
-    //}
-    //scratch[0] = x;
-  //}
+  // return __hipsycl_group_broadcast(g, local_x, 0);
+
+  auto y = __cbs_reduce_add(x);
 
   __hipsycl_group_barrier(g);
-  return extract(local_x, 0);
-#endif
+  return y;
+  */
 }
 
 // exclusive_scan
@@ -674,8 +721,8 @@ template <typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __hipsycl_inclusive_scan_over_group(sub_group g, T x,
                                                             BinaryOperation binary_op) {
 #ifdef RV
-  const size_t       lid        = g.get_local_linear_id();
- const size_t       lrange     = g.get_local_linear_range();
+  const size_t lid = g.get_local_linear_id();
+  const size_t lrange = g.get_local_linear_range();
   auto local_x = x;
 #pragma unroll
   for (size_t i = 1; i < lrange; i *= 2) {
@@ -685,17 +732,17 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_inclusive_scan_over_group(sub_group g, T x,
   }
   return local_x;
 
-/*
-  const size_t       lrange     = g.get_local_linear_range();
-#pragma unroll
-  for (size_t i = 1; i < lrange; ++i) {
-    const auto e1 = rv_extract(x, i-1);
-    const auto e2 = rv_extract(x, i);
-    const auto y = binary_op(e1, e2);
-    x = rv_insert(x, i, y);
-  }
-  return x;
-  */
+  /*
+    const size_t       lrange     = g.get_local_linear_range();
+  #pragma unroll
+    for (size_t i = 1; i < lrange; ++i) {
+      const auto e1 = rv_extract(x, i-1);
+      const auto e2 = rv_extract(x, i);
+      const auto y = binary_op(e1, e2);
+      x = rv_insert(x, i, y);
+    }
+    return x;
+    */
 
 #else
   T *scratch = static_cast<T *>(g.get_local_memory_ptr());
@@ -736,7 +783,7 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_inclusive_scan_over_group(group<Dim> g, T x,
 
   if (g.leader()) {
     for (auto i = 1ul; i < g.get_local_linear_range() / sg.get_local_linear_range(); ++i) {
-      scratch[i] = binary_op(scratch[i-1], scratch[i]);
+      scratch[i] = binary_op(scratch[i - 1], scratch[i]);
     }
   }
   __hipsycl_group_barrier(g);
@@ -767,8 +814,6 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_inclusive_scan_over_group(group<Dim> g, T x,
   return tmp;
 #endif
 }
-
-
 
 template <typename Group, typename V, typename T, typename BinaryOperation,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
@@ -820,8 +865,6 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_right(group<Dim> g, T x,
 
   return x;
 }
-
-
 
 // permute_group_by_xor
 template <int Dim, typename T>
@@ -881,17 +924,15 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_select_from_group(sub_group g, T x,
 #ifdef RV
   return shuffle_impl(x, remote_local_id);
 #else
-  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+  //T *scratch = static_cast<T *>(g.get_local_memory_ptr());
 
-  auto lid = g.get_local_linear_id();
-
-  scratch[lid] = x;
+  //auto lid = g.get_local_linear_id();
+  //scratch[lid] = x;
   __hipsycl_group_barrier(g);
-
-  x = scratch[remote_local_id];
+  //x = scratch[remote_local_id];
+  auto y = __cbs_shuffle(x, remote_local_id);
   __hipsycl_group_barrier(g);
-
-  return x;
+  return y;
 #endif
 }
 
