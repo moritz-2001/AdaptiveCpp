@@ -72,9 +72,9 @@ using namespace hipsycl::compiler::cbs;
 constexpr std::array<char, 3> DimName{'x', 'y', 'z'};
 
 enum class HierarchicalLevel {
-  ONLY_GROUP,
-  IN_GROUP,
-  IN_SUBGROUP,
+  CBS,
+  H_CBS_GROUP,
+  H_CBS_SUBGROUP,
 };
 
 // Reference type only!
@@ -88,10 +88,10 @@ struct HierarchicalSplitInfo {
 
   llvm::Value *getContiguousIdx() {
     switch (Level) {
-    case HierarchicalLevel::ONLY_GROUP:
-    case HierarchicalLevel::IN_GROUP:
+    case HierarchicalLevel::CBS:
+    case HierarchicalLevel::H_CBS_GROUP:
       return ContiguousIdx;
-    case HierarchicalLevel::IN_SUBGROUP:
+    case HierarchicalLevel::H_CBS_SUBGROUP:
       return SGIdArg;
     }
   }
@@ -136,7 +136,7 @@ llvm::LoadInst *mergeGVLoadsInEntry(llvm::Function &F, llvm::StringRef VarName,
   }
 
   llvm::IRBuilder Builder{F.getEntryBlock().getTerminator()};
-  auto *Load = Builder.CreateLoad(ty ? ty : GV->getType(), GV, "cbs.load." + GV->getName());
+  auto *Load = Builder.CreateLoad(ty ? ty : SizeT, GV, "cbs.load." + GV->getName());
   return Load;
 }
 
@@ -339,65 +339,71 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
   llvm::IRBuilder Builder{LoadBB, LoadBB->getFirstInsertionPt()};
 
   const size_t Dim = LocalSize.size();
-
-  std::array<llvm::StringRef, 3> LocalIdGlobalNamesRotated;
-  std::array<char, 3> DimNameRotated;
-  if (IsSscp)
-    for (size_t D = 0; D < Dim; ++D) {
-      LocalIdGlobalNamesRotated[D] = LocalIdGlobalNames[Dim - D - 1];
-      DimNameRotated[D] = DimName[Dim - D - 1];
-    }
-  else
-    for (size_t D = 0; D < Dim; ++D) {
-      LocalIdGlobalNamesRotated[D] = LocalIdGlobalNames[D];
-      DimNameRotated[D] = DimName[D];
-    }
-
   const auto InnerMost = Dim - 1;
   constexpr auto OuterMost = 0;
+
+  struct LocalIdNames {
+      // e.g.: x
+      char shortName;
+      llvm::StringRef name;
+  };
+
+  std::array<LocalIdNames, 3> LocalIdsNames{};
+  for (size_t D = 0; D < Dim; ++D) {
+    LocalIdsNames[D].shortName =  DimName[D];
+    LocalIdsNames[D].name = LocalIdGlobalNames[D];
+  }
+  if (IsSscp) {
+    std::reverse(LocalIdsNames.begin(), LocalIdsNames.begin() + Dim);
+  }
+
+  auto loopIncrement = [&HI, &InnerMost](const int D) -> size_t {
+    if (D != InnerMost) {
+      return 1;
+    }
+    switch (HI.Level) {
+    case HierarchicalLevel::CBS:
+    case HierarchicalLevel::H_CBS_SUBGROUP:
+      return 1;
+    case HierarchicalLevel::H_CBS_GROUP:
+      return SGSize;
+    }
+    assert(false);
+    return 0;
+  };
+
+  auto suffix = [&HI, &LocalIdsNames, &EntryId](int D) {
+    return(llvm::Twine{HI.Level == HierarchicalLevel::H_CBS_SUBGROUP ? 's' : LocalIdsNames[D].shortName} +
+         ".subcfg." + llvm::Twine{EntryId})
+            .str();
+  };
 
   // from innermost to outermost: create loops around the LastHeader and use AfterBB as dummy exit
   // to be replaced by the outer latch later
   llvm::SmallVector<llvm::PHINode *, 3> IndVars;
-  for (int D = Dim - 1; D >= 0; --D) {
-    const std::string Suffix =
-        (llvm::Twine{HI.Level == HierarchicalLevel::IN_SUBGROUP ? 's' : DimNameRotated[D]} +
-         ".subcfg." + llvm::Twine{EntryId})
-            .str();
+  for (int D = static_cast<int>(Dim) - 1; D >= 0; --D) {
+    const std::string Suffix = suffix(D);
 
     auto *Header = llvm::BasicBlock::Create(LastHeader->getContext(), "header." + Suffix + "b",
                                             LastHeader->getParent(), LastHeader);
-
     Builder.SetInsertPoint(Header, Header->getFirstInsertionPt());
-
     auto *WIIndVar =
         Builder.CreatePHI(DL.getLargestLegalIntType(F.getContext()), 2, "indvar." + Suffix);
     WIIndVar->addIncoming(Builder.getIntN(DL.getLargestLegalIntTypeSizeInBits(), 0),
                           &F.getEntryBlock());
+
     IndVars.push_back(WIIndVar);
     Builder.CreateBr(LastHeader);
 
     auto *Latch = llvm::BasicBlock::Create(F.getContext(), "latch." + Suffix + "b", &F);
     Builder.SetInsertPoint(Latch, Latch->getFirstInsertionPt());
-    size_t addOperand = [&] -> size_t {
-      if (D != InnerMost) {
-        return 1;
-      }
-      switch (HI.Level) {
-      case HierarchicalLevel::ONLY_GROUP:
-      case HierarchicalLevel::IN_SUBGROUP:
-        return 1;
-      case HierarchicalLevel::IN_GROUP:
-        return SGSize;
-      }
-    }();
+
     auto *IncIndVar = Builder.CreateAdd(
-        WIIndVar, Builder.getIntN(DL.getLargestLegalIntTypeSizeInBits(), addOperand),
+        WIIndVar, Builder.getIntN(DL.getLargestLegalIntTypeSizeInBits(), loopIncrement(D)),
         "addInd." + Suffix, true, false);
     WIIndVar->addIncoming(IncIndVar, Latch);
 
     HIPSYCL_DEBUG_ERROR << "ICMP " << *LocalSize[D] << " " << *IncIndVar << "\n";
-
     llvm::Value *LoopCond = Builder.CreateICmpULT(IncIndVar, LocalSize[D], "exit.cond." + Suffix);
 
     // TODO ADD IF NOT RV
@@ -422,7 +428,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     IndVars[D]->replaceIncomingBlockWith(&F.getEntryBlock(), IndVars[D - 1]->getParent());
   }
 
-  if (HI.Level == HierarchicalLevel::IN_SUBGROUP or HI.Level == HierarchicalLevel::ONLY_GROUP) {
+  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
     auto *MDWorkItemLoop = llvm::MDNode::get(
         F.getContext(), {llvm::MDString::get(F.getContext(), MDKind::WorkItemLoop)});
     auto *LoopID =
@@ -437,21 +443,21 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
   llvm::Value *Idx = IndVars[OuterMost];
   for (size_t D = 1; D < Dim; ++D) {
     const std::string Suffix =
-        (llvm::Twine{DimNameRotated[D]} + ".subcfg." + llvm::Twine{EntryId}).str();
+        (llvm::Twine{LocalIdsNames[D].shortName} + ".subcfg." + llvm::Twine{EntryId}).str();
 
     Idx = Builder.CreateMul(Idx, LocalSize[D], "idx.mul." + Suffix, true);
     Idx = Builder.CreateAdd(IndVars[D], Idx, "idx.add." + Suffix, true);
   }
 
   for (size_t D = 0; D < Dim; ++D) {
-    VMap[mergeGVLoadsInEntry(F, LocalIdGlobalNamesRotated[D])] = IndVars[D];
+    VMap[mergeGVLoadsInEntry(F, LocalIdsNames[D].name)] = IndVars[D];
   }
 
-  if (HI.Level == HierarchicalLevel::ONLY_GROUP) {
+  if (HI.Level == HierarchicalLevel::CBS) {
     Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     VMap[mergeGVLoadsInEntry(F, SgIdGlobalName)] = Builder.CreateURem(
         IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
-  } else if (HI.Level == HierarchicalLevel::IN_SUBGROUP) {
+  } else if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     VMap[HI.SGIdArg] = Idx;
     Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     auto StridedInner = llvm::cast<llvm::Instruction>(HI.OuterIndices.back())->getOperand(0);
@@ -459,22 +465,25 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     // TODO ? fixme: this is not actually the contiguous index for multi-dim..
   }
 
-  if (HI.Level == HierarchicalLevel::IN_SUBGROUP or HI.Level == HierarchicalLevel::ONLY_GROUP) {
+  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
     VMap[ContiguousIdx] = Idx; // ContiguousIdx = idx + sg_id
     ContiguousIdx = Idx;
   } else {
-    assert(HI.Level == HierarchicalLevel::IN_GROUP);
+    assert(HI.Level == HierarchicalLevel::H_CBS_GROUP);
     Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
-    VMap[mergeGVLoadsInEntry(F, LocalIdGlobalNamesRotated[InnerMost])] =
+    llvm::outs() << "IND VAR: " << *IndVars.back() << "\n";
+    llvm::outs() << "SgIdGlobal: " << *mergeGVLoadsInEntry(F, SgIdGlobalName) << "\n";
+
+    VMap[mergeGVLoadsInEntry(F, LocalIdsNames[InnerMost].name)] =
         Builder.CreateAdd(IndVars.back(), mergeGVLoadsInEntry(F, SgIdGlobalName));
     VMap[ContiguousIdx] = ContiguousIdx;
   }
 
-  if (HI.Level == HierarchicalLevel::IN_SUBGROUP) {
+  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     llvm::ValueToValueMapTy VMap;
     // Old Idx becomes new Idx
     VMap[HI.ContiguousIdx] = Idx;
-    VMap[mergeGVLoadsInEntry(F, LocalIdGlobalNamesRotated[InnerMost])] = Idx;
+    VMap[mergeGVLoadsInEntry(F, LocalIdsNames[InnerMost].name)] = Idx;
     VMap[HI.SGIdArg] = IndVars[0];
     VMap[mergeGVLoadsInEntry(F, SgIdGlobalName)] = IndVars[0];
     llvm::SmallVector<llvm::BasicBlock *> Blocks{Latches.begin(), Latches.end()};
@@ -621,7 +630,7 @@ SubCFG::SubCFG(llvm::BasicBlock *EntryBarrier, llvm::AllocaInst *LastBarrierIdSt
       if (std::find(Blocks_.begin(), Blocks_.end(), Succ) != Blocks_.end())
         continue;
 
-      if (!(HI.Level == HierarchicalLevel::IN_SUBGROUP ? utils::hasOnlySubBarrier(Succ, SAA)
+      if (!(HI.Level == HierarchicalLevel::H_CBS_SUBGROUP ? utils::hasOnlySubBarrier(Succ, SAA)
                                                        : utils::hasOnlyBarrier(Succ, SAA))) {
         WL.push_back(Succ);
         Blocks_.push_back(Succ);
@@ -697,7 +706,7 @@ void SubCFG::replicate(
   createLoopsAround(F, AfterBB, LocalSize, EntryId_, VMap, Latches, LastHeader, Idx, IsSscp, HI);
 
   for (size_t D = 0; D < LocalSize.size(); ++D) {
-    WIIndVars_.push_back(VMap[HI.Level == HierarchicalLevel::IN_SUBGROUP
+    WIIndVars_.push_back(VMap[HI.Level == HierarchicalLevel::H_CBS_SUBGROUP
                                   ? HI.SGIdArg
                                   : mergeGVLoadsInEntry(F, LocalIdGlobalNames[D])]);
   }
@@ -859,11 +868,10 @@ void SubCFG::arrayifyMultiSubCfgValues(
         // GEP from already widened alloca: reuse alloca
         if (auto *GEP = llvm::dyn_cast<llvm::GetElementPtrInst>(&I))
           if (GEP->hasMetadata(MDKind::Arrayified)) {
-            // TODO WRITE DOWN
             // If we are on the subgroup level, then the gep operand might be an argument
             // and not directly an alloca.
             auto *GepPointerOperand = GEP->getPointerOperand();
-            if (HI.Level == HierarchicalLevel::IN_SUBGROUP) {
+            if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
               if (auto *Argument = llvm::dyn_cast<llvm::Argument>(GepPointerOperand)) {
                 GepPointerOperand = (*HI.ArgsToAloca)[Argument];
               }
@@ -1380,7 +1388,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
   // Since, the non arrayfied alloca is still in the entry block of the WORKGROUP function, we do
   // not see the alloca. Thus, we need to look at the arguments of the SUBGROUP level function,
   // and if they are non arrayified alloca, then we arrayify them.
-  if (HI.Level == HierarchicalLevel::IN_SUBGROUP) {
+  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     std::vector<std::pair<llvm::AllocaInst *, llvm::Argument *>> WL;
     for (auto [Arg, Alloca] : *HI.ArgsToAloca) {
       // already arrayified
@@ -1452,7 +1460,7 @@ getBarrierIds(llvm::BasicBlock *Entry, llvm::SmallPtrSetImpl<llvm::BasicBlock *>
   // store all other barrier blocks with a unique id:
   size_t BarrierId = 1;
   auto hasOnlyBarrier =
-      HI.Level == HierarchicalLevel::IN_SUBGROUP ? utils::hasOnlySubBarrier : utils::hasOnlyBarrier;
+      HI.Level == HierarchicalLevel::H_CBS_SUBGROUP ? utils::hasOnlySubBarrier : utils::hasOnlyBarrier;
 
   for (auto *BB : Blocks)
     if (Barriers.find(BB) == Barriers.end() && hasOnlyBarrier(BB, SAA))
@@ -1834,7 +1842,7 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
                        size_t Dim, llvm::ArrayRef<llvm::Value *> LocalSize,
                        llvm::Value *ReqdArrayElements, HierarchicalSplitInfo HI);
 
-void formSubgroupCfg(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationInfo &SAA, bool IsSscp,
+void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationInfo &SAA, bool IsSscp,
                      size_t Dim, llvm::ArrayRef<llvm::Value *> LocalSize,
                      HierarchicalSplitInfo HI) {
   auto Blocks = Cfg.getNewBlocks(); // copy
@@ -1962,7 +1970,7 @@ void formSubgroupCfg(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationInf
   formSubCfgGeneric(*NewF, NewLI, NewDT, NewPDT, SAA, IsSscp, Dim,
                     {llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize)},
                     llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize),
-                    {HierarchicalLevel::IN_SUBGROUP, NewLocalSize, NewIndVars, NewIndVar, SGIdArg,
+                    {HierarchicalLevel::H_CBS_SUBGROUP, NewLocalSize, NewIndVars, NewIndVar, SGIdArg,
                      &ArgsToAlloca});
 
   // The SgIdArg in NewF should not have any users.
@@ -1991,9 +1999,9 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
   mergeGVLoadsInEntry(F, SgIdGlobalName);
 
   auto RImpl = getRegion(F, LI, Blocks);
-  hipsycl::compiler::Region R{*RImpl};
+  Region R{*RImpl};
   auto VecInfo = getVectorizationInfo(F, R, LI, DT, PDT, Dim, HI);
-  VecInfo.setPinnedShape(*HI.ContiguousIdx, hipsycl::compiler::VectorShape::cont());
+  VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   llvm::SmallPtrSet<llvm::BasicBlock *, 2> ExitingBlocks;
   R.getEndingBlocks(ExitingBlocks);
@@ -2050,9 +2058,9 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
     Cfg.fixSingleSubCfgValues(DT, RemappedInstAllocaMap, ReqdArrayElements, VecInfo, LoadToAlloca);
   }
 
-  if (HI.Level == HierarchicalLevel::IN_GROUP) {
+  if (HI.Level == HierarchicalLevel::H_CBS_GROUP) {
     for (auto &Cfg : SubCFGs) {
-      formSubgroupCfg(Cfg, F, SAA, IsSscp, Dim, LocalSize, HI);
+      formSubgroupCfgs(Cfg, F, SAA, IsSscp, Dim, LocalSize, HI);
     }
 
     // Replace intrinsic with identity, if x does not span multiple sub-groups
@@ -2066,7 +2074,7 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
   /* TODO
    * 1. Incomplete sub-groups (masked load and stores?) or conditional uniform branch
    */
-  if (HI.Level == HierarchicalLevel::IN_SUBGROUP) {
+  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     ReduceIntrinsic{}.vectorizeAllInstances(F, SubCFGs, &InstContReplicaMap);
     Shift<true>{}.vectorizeAllInstances(F, SubCFGs);
     Shift<false>{}.vectorizeAllInstances(F, SubCFGs);
@@ -2104,25 +2112,11 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
 
   formSubCfgGeneric(
       F, LI, DT, PDT, SAA, IsSscp, Dim, LocalSize, ReqdArrayElements,
-      {utils::hasSubBarriers(F, SAA) ? HierarchicalLevel::IN_GROUP : HierarchicalLevel::ONLY_GROUP,
+      {utils::hasSubBarriers(F, SAA) ? HierarchicalLevel::H_CBS_GROUP : HierarchicalLevel::CBS,
        {},
        {},
        IndVar,
        nullptr});
-
-  // The loocal size's might still be uses of the global variables.
-  // Hence, we replace them with the concrete values
-  {
-    llvm::SmallVector<llvm::BasicBlock *> Blocks;
-    std::transform(F.begin(), F.end(), std::back_inserter(Blocks),
-                   [](llvm::BasicBlock &BB) { return &BB; });
-
-    llvm::ValueToValueMapTy GlobalVarToIdxMap;
-    for (size_t D = 0; D < LocalSize.size(); ++D) {
-      GlobalVarToIdxMap[mergeGVLoadsInEntry(F, LocalSizeGlobalNames[D])] = LocalSize[D];
-    }
-    llvm::remapInstructionsInBlocks(Blocks, GlobalVarToIdxMap);
-  }
 
   // The dummy induction variable can now be removed. It should not have any users.
   {
@@ -2186,7 +2180,7 @@ void createLoopsAroundKernel(llvm::Function &F, llvm::DominatorTree &DT, llvm::L
   auto *LastHeader = Body;
 
   createLoopsAround(F, ExitBB, LocalSize, 0, VMap, Latches, LastHeader, Idx, IsSscp,
-                    {HierarchicalLevel::ONLY_GROUP, {}, {}, Idx, nullptr});
+                    {HierarchicalLevel::CBS, {}, {}, Idx, nullptr});
 
   F.getEntryBlock().getTerminator()->setSuccessor(0, LastHeader);
   llvm::remapInstructionsInBlocks(Blocks, VMap);
@@ -2245,6 +2239,7 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
 
   if (utils::hasBarriers(F, *SAA) || utils::hasSubBarriers(F, *SAA)) {
     formSubCfgs(F, LI, DT, PDT, *SAA, IsSscp_);
+    assert(!llvm::verifyFunction(F, &llvm::outs()));
   } else {
     createLoopsAroundKernel(F, DT, LI, PDT, IsSscp_);
   }
