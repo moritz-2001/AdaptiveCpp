@@ -111,8 +111,12 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_reduce(group<Dim> g, T x, BinaryOperatio
 template <int Dim, typename T>
 HIPSYCL_KERNEL_TARGET T __hipsycl_group_broadcast(
     group<Dim> g, T x, typename group<Dim>::linear_id_type local_linear_id = 0) {
+    T* scratch = static_cast<T*>(g.get_local_memory_ptr());
+    if (local_linear_id == g.get_local_linear_id()) {
+      scratch[0] = x;
+    }
   __hipsycl_group_barrier(g);
-  T tmp = extract(x, local_linear_id);
+    T tmp = scratch[0];
   __hipsycl_group_barrier(g);
   return tmp;
 }
@@ -121,13 +125,7 @@ template <typename T>
 HIPSYCL_KERNEL_TARGET T __hipsycl_shift_group_right(sub_group g, T x,
                                                     typename sub_group::linear_id_type delta = 1) {
 #ifdef RV
-  T ret = x;
-#pragma unroll
-  for (int i = 0; i < rv_num_lanes(); ++i) {
-    const T v = rv_extract(x, (rv_num_lanes() - delta + i) % rv_num_lanes());
-    ret = rv_insert(ret, i, v);
-  }
-  return ret;
+    return shuffle_up_impl(x, delta);
 #else
   //T *scratch = static_cast<T *>(g.get_local_memory_ptr());
 
@@ -159,7 +157,7 @@ template <typename T>
 HIPSYCL_KERNEL_TARGET T __hipsycl_group_broadcast(sub_group g, T x,
                                                   typename sub_group::linear_id_type local_id) {
 #ifdef RV
-  return rv_extract(x, local_id);
+  return extract_impl(x, local_id);
 #else
   __hipsycl_group_barrier(g);
   if constexpr (std::is_integral_v<T>) {
@@ -469,7 +467,7 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_reduce_over_group(group<Dim> g, T x, BinaryOpe
 
 template<typename BinaryOperation, typename T>
 constexpr int reduce_supported_op() {
-  if constexpr (std::is_integral_v<T>) {
+  if constexpr (std::is_integral_v<T> or std::is_same_v<T, size_t>) {
     if constexpr (std::is_same_v<BinaryOperation, sycl::plus<T>>) {
       return 0;
     } else if constexpr (std::is_same_v<BinaryOperation, sycl::multiplies<T>>) {
@@ -924,6 +922,7 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_select_from_group(sub_group g, T x,
 #ifdef RV
   return shuffle_impl(x, remote_local_id);
 #else
+  // TODO backup implementation
   //T *scratch = static_cast<T *>(g.get_local_memory_ptr());
 
   //auto lid = g.get_local_linear_id();

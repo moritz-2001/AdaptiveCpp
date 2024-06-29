@@ -120,6 +120,8 @@ bool endsWithBarrier(const llvm::BasicBlock *BB,
 llvm::CallInst *createBarrier(llvm::Instruction *InsertBefore,
                               hipsycl::compiler::SplitterAnnotationInfo &SAA);
 
+bool isCBSIntrinsic(llvm::Function* F);
+
 
 bool isSubBarrier(const llvm::Instruction *I, const hipsycl::compiler::SplitterAnnotationInfo &SAA);
 bool blockHasSubBarrier(const llvm::BasicBlock *BB, const hipsycl::compiler::SplitterAnnotationInfo &SAA);

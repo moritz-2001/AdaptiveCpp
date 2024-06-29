@@ -110,7 +110,9 @@ void registerCBSPipeline(llvm::ModulePassManager &MPM, OptLevel Opt, bool IsSscp
   FPM.addPass(CanonicalizeBarriersPass{});
   // if (IsSscp)
   FPM.addPass(KernelFlatteningPass{});
+
   FPM.addPass(SubCfgFormationPass{IsSscp});
+
   FPM.addPass(RemoveBarrierCallsPass{});
 
   FPM.addPass(KernelFlatteningPass{});

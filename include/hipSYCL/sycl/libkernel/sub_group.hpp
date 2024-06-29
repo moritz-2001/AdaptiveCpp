@@ -41,7 +41,7 @@
 #endif
 
 #define HIERACHICAL
-#define RV
+//#define RV
 
 #if defined(RV)
 #include "host/rv.h"
@@ -96,7 +96,7 @@ public:
 
   HIPSYCL_KERNEL_TARGET
   range_type get_max_local_range() const {
-    return range_type{get_local_linear_range()};
+    return range_type{SGSize};
   }
 
   HIPSYCL_KERNEL_TARGET
@@ -132,6 +132,7 @@ public:
 
   HIPSYCL_KERNEL_TARGET
   void *get_local_memory_ptr() const {
+    // TODO not offically supported
     return _local_memory;
   }
 private:

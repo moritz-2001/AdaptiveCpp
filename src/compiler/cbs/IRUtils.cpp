@@ -156,6 +156,13 @@ llvm::CallInst *createBarrier(llvm::Instruction *InsertBefore, SplitterAnnotatio
   return llvm::CallInst::Create(F, "", InsertBefore);
 }
 
+bool isCBSIntrinsic(llvm::Function *F) {
+  std::array arr{"__cbs_reduce", "__cbs_shift_left", "__cbs_broadcast", "__cbs_shuffle", "__cbs_shift_right"};
+  return std::any_of(arr.begin(), arr.end(), [&](std::string_view str) {
+    return F->getName().contains(str);
+  });
+}
+
 bool isSubBarrier(const llvm::Instruction *I, const SplitterAnnotationInfo &SAA) {
   if (const auto *CI = llvm::dyn_cast<llvm::CallInst>(I))
     return CI->getCalledFunction() && SAA.isSubSplitterFunc(CI->getCalledFunction());
