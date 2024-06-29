@@ -28,6 +28,7 @@ The other compilation flows `omp`, `cuda`, `hip` should mainly be used when *int
 * Some other compilers like `nvcc` or `hipcc` compile with `-O3` by default. AdaptiveCpp, like regular g++ or clang++ compilers, does not do this and instead expects optimization flags to be provided by the user.
 * The oneAPI SYCL compiler `icpx` compiles with `-ffast-math -ffp-contract=fast` by default. AdaptiveCpp does not use `-ffast-math` by default. Make sure to align these flags to obtain fair comparisons.
 * AdaptiveCpp's clang-based compilation flows (`omp`, `generic`, `hip`, `cuda`) compile with `-ffp-contract=fast` by default. Non-clang based flows do not use that flag. If you use compilation flows that do not rely on clang (e.g. `cuda-nvcxx` or `omp.library-only`), it is your own responsibility to apply comparable compilation flags!
+* The oneAPI SYCL compiler by default does not correctly round `sqrt` calls, using approximate builtins instead **even when using `-fno-fast-math`**. AdaptiveCpp (both with `generic` and `hip`/`cuda` targets) by default correctly rounds `sqrt` builtin calls and divisions. This behavior also aligns with the defaults of e.g. `hipcc`. You may use the `-fsycl-fp32-prec-sqrt` to force DPC++ to correctly round `sqrt`.
 * If you are unsure, the compilation flags used by clang-based compilers under the hood can be inspected using `<clang invocation> -###`. This also works for AdaptiveCpp's clang-based compilation flows. When in doubt, use this mechanism to align compilation flags between compilers.
 * The compiler invocation that `acpp` generates can be printed and its flags inspected with `--acpp-dryrun`.
 
@@ -67,7 +68,9 @@ Clearing the cache can be accomplished by simply clearing the cache directory, e
 
 ## CPU backend
 
-* Enable OpenMP thread pinning (e.g. `OMP_PROC_BIND=true`). AdaptiveCpp uses asynchronous worker threads for some light-weight tasks such as garbage collection, and these additional threads can interfere with kernel execution if OpenMP threads are not bound to cores.
+* When comparing CPU performance to icpx/DPC++, please note that DPC++ relies on either the Intel CPU OpenCL implementation or oneAPI construction kit to target CPUs. AdaptiveCpp can target CPUs either through OpenMP, or through OpenCL. In the latter case, it can use exactly the same OpenCL implementations that DPC++ uses for CPUs as well. So, if you notice that DPC++ performs better on CPU in some scenario, it might be a good idea to try the Intel OpenCL CPU implementation or the oneAPI construction kit with AdaptiveCpp! Drawing e.g. the conclusion that DPC++ is faster than AdaptiveCpp on CPU but only testing AdaptiveCpp's OpenMP backend is *not* correct reasoning!
+* When targeting the Intel OpenCL CPU implementation, you might also want to take into account [Intel's vectorizer tuning knobs](https://www.intel.com/content/www/us/en/docs/opencl-sdk/developer-guide-core-xeon/2018/vectorizer-knobs.html).
+* For the OpenMP backend, enable OpenMP thread pinning (e.g. `OMP_PROC_BIND=true`). AdaptiveCpp uses asynchronous worker threads for some light-weight tasks such as garbage collection, and these additional threads can interfere with kernel execution if OpenMP threads are not bound to cores.
 
 ### With omp.* compilation flow
 * When using `OMP_PROC_BIND`, there have been observations that performance suffers substantially, if AdaptiveCpp's OpenMP backend has been compiled against a different OpenMP implementation than the one used by `acpp` under the hood. For example, if `omp.acclerated` is used, `acpp` relies on clang and typically LLVM `libomp`, while the AdaptiveCpp runtime library may have been compiled with gcc and `libgomp`. The easiest way to resolve this is to appropriately use `cmake -DCMAKE_CXX_COMPILER=...` when building AdaptiveCpp to ensure that it is built using the same compiler. **If you oberve substantial performance differences between AdaptiveCpp and native OpenMP, chances are your setup is broken.**
@@ -77,8 +80,7 @@ Clearing the cache can be accomplished by simply clearing the cache directory, e
 * Don't use `nd_range` parallel for unless you absolutely have to, as it is difficult to map efficiently to CPUs. 
 * If you don't need barriers or local memory, use `parallel_for` with `range` argument.
 * If you need local memory or barriers, scoped parallelism or hierarchical parallelism models may perform better on CPU than `parallel_for` kernels using `nd_range` argument and should be preferred. Especially scoped parallelism also works well on GPUs.
-* If you *have* to use `nd_range parallel_for` with barriers on CPU, the `omp.accelerated`  or `generic` compilation flow will most likely provide substantially better performance than the `omp.library-only` compilation target. See the [documentation on compilation flows](doc/compilation.md) for details.
-
+* If you *have* to use `nd_range parallel_for` with barriers on CPU, the `omp.accelerated`  or `generic` compilation flow will most likely provide substantially better performance than the `omp.library-only` compilation target. See the [documentation on compilation flows](compilation.md) for details.
 
 ## Strong-scaling/latency-bound problems
 

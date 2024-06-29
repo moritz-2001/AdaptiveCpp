@@ -127,7 +127,7 @@ bool removeDynamicLocalMemorySupport(llvm::Module& M) {
 }
 
 LLVMToSpirvTranslator::LLVMToSpirvTranslator(const std::vector<std::string> &KN)
-    : LLVMToBackendTranslator{sycl::sscp::backend::spirv, KN}, KernelNames{KN} {}
+    : LLVMToBackendTranslator{sycl::jit::backend::spirv, KN}, KernelNames{KN} {}
 
 
 bool LLVMToSpirvTranslator::toBackendFlavor(llvm::Module &M, PassHandler& PH) {
@@ -314,7 +314,7 @@ bool LLVMToSpirvTranslator::applyBuildOption(const std::string &Option, const st
 }
 
 bool LLVMToSpirvTranslator::applyBuildFlag(const std::string& Flag) {
-  if(Flag == "enable-intel-llvm-spirv-options") {
+  if(Flag == "spirv-enable-intel-llvm-spirv-options") {
     UseIntelLLVMSpirvArgs = true;
     return true;
   }

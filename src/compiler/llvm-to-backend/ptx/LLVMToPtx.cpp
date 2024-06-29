@@ -129,7 +129,7 @@ void setPrecSqrt(llvm::Module& M, int Mode) {
 }
 
 LLVMToPtxTranslator::LLVMToPtxTranslator(const std::vector<std::string> &KN)
-    : LLVMToBackendTranslator{sycl::sscp::backend::ptx, KN}, KernelNames{KN} {}
+    : LLVMToBackendTranslator{sycl::jit::backend::ptx, KN}, KernelNames{KN} {}
 
 
 bool LLVMToPtxTranslator::toBackendFlavor(llvm::Module &M, PassHandler& PH) {
@@ -315,13 +315,13 @@ bool LLVMToPtxTranslator::applyBuildOption(const std::string &Option, const std:
 }
 
 bool LLVMToPtxTranslator::applyBuildFlag(const std::string& Option) {
-  if(Option == "ftz") {
+  if(Option == "ptx-ftz") {
     this->FlushDenormalsToZero = 1;
     return true;
-  } else if(Option == "approx-div") {
+  } else if(Option == "ptx-approx-div") {
     this->PreciseDiv = 0;
     return true;
-  } else if(Option == "approx-sqrt") {
+  } else if(Option == "ptx-approx-sqrt") {
     this->PreciseSqrt = 0;
     return true;
   }
