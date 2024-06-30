@@ -161,7 +161,7 @@ HIPSYCL_KERNEL_TARGET T __hipsycl_group_broadcast(sub_group g, T x,
 #else
   __hipsycl_group_barrier(g);
   if constexpr (std::is_integral_v<T>) {
-  T tmp = __cbs_broadcast(x, local_id);
+  T tmp = __cbs_extract(x, local_id);
     __hipsycl_group_barrier(g);
     return tmp;
   } else {
