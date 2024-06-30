@@ -89,7 +89,6 @@ bool LLVMToHostTranslator::toBackendFlavor(llvm::Module &M, PassHandler &PH) {
       Operands.push_back(llvm::ValueAsMetadata::getConstant(
           llvm::ConstantInt::get(llvm::Type::getInt32Ty(M.getContext()), 1)));
 
-      // Store kernel meta data
       M.getOrInsertNamedMetadata(SscpAnnotationsName)
           ->addOperand(llvm::MDTuple::get(M.getContext(), Operands));
 
@@ -127,7 +126,7 @@ bool LLVMToHostTranslator::toBackendFlavor(llvm::Module &M, PassHandler &PH) {
 }
 
 bool LLVMToHostTranslator::translateToBackendFormat(llvm::Module &FlavoredModule,
-                                                     std::string &out) {
+                                                    std::string &out) {
   auto InputFile = llvm::sys::fs::TempFile::create("hipsycl-sscp-host-%%%%%%.bc");
   auto OutputFile = llvm::sys::fs::TempFile::create("hipsycl-sscp-host-%%%%%%.so");
 
