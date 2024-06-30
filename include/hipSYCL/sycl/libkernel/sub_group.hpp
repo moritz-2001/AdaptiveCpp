@@ -49,9 +49,7 @@
 
 constexpr size_t SGSize = 32;
 
-
-namespace hipsycl {
-namespace sycl {
+namespace hipsycl::sycl {
 
 #if defined(HIERACHICAL) and not defined(RV)
 class sub_group {
@@ -356,6 +354,6 @@ private:
 #endif
 
 }
-}
+
 
 #endif

@@ -17,7 +17,7 @@ namespace sycl {
 
 template <typename T> HIPSYCL_FORCE_INLINE int dot_product(sub_group sg, T a, T b) {
   T c = a*b;
-  return detail::host_builtins::__hipsycl_reduce_over_group(sg, c, plus<T>{});
+  return detail::host_builtins::__acpp_reduce_over_group(sg, c, plus<T>{});
 }
 
 template <typename T, typename Pred> HIPSYCL_FORCE_INLINE int find_if(sub_group sg, T a, Pred pred) {
@@ -26,7 +26,7 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE int find_if(sub_group 
 #else
   T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
   scratch[sg.get_local_linear_id()] = a;
-  detail::host_builtins::__hipsycl_group_barrier(sg);
+  detail::host_builtins::__acpp_group_barrier(sg);
   int j = -1;
   if (sg.leader()) {
     for (auto i = 0; i < sg.get_local_linear_range(); ++i) {
@@ -36,20 +36,20 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE int find_if(sub_group 
       }
     }
   }
-  return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
+  return detail::host_builtins::__acpp_group_broadcast(sg, j, 0);
 #endif
 }
 
 template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t count_if(sub_group sg, T a, Pred pred) {
   uint32_t x = pred(a) ? 1 : 0;
-  return detail::host_builtins::__hipsycl_reduce_over_group(sg, x, sycl::plus<uint32_t>{});
+  return detail::host_builtins::__acpp_reduce_over_group(sg, x, sycl::plus<uint32_t>{});
 /*
 #ifdef RV
   return detail::rv_count_if(a, pred);
 #else
   T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
   scratch[sg.get_local_linear_id()] = a;
-  detail::host_builtins::__hipsycl_group_barrier(sg);
+  detail::host_builtins::__acpp_group_barrier(sg);
   int j = 0;
   if (sg.leader()) {
     for (auto i = 0; i < sg.get_local_linear_range(); ++i) {
@@ -58,7 +58,7 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t count_if(sub_
       }
     }
   }
-  return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
+  return detail::host_builtins::__acpp_group_broadcast(sg, j, 0);
 #endif
 */
 }
@@ -70,7 +70,7 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t partition(sub
   T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
   scratch[sg.get_local_linear_id()] = a;
 
-  detail::host_builtins::__hipsycl_group_barrier(sg);
+  detail::host_builtins::__acpp_group_barrier(sg);
   int j = 0;
   if (sg.leader()) {
     for (auto i = 0; i < sg.get_local_linear_range(); ++i) {
@@ -80,10 +80,10 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t partition(sub
       }
     }
   }
-  detail::host_builtins::__hipsycl_group_barrier(sg);
+  detail::host_builtins::__acpp_group_barrier(sg);
   a = scratch[sg.get_local_linear_id()];
-  detail::host_builtins::__hipsycl_group_barrier(sg);
-  return detail::host_builtins::__hipsycl_group_broadcast(sg, j, 0);
+  detail::host_builtins::__acpp_group_barrier(sg);
+  return detail::host_builtins::__acpp_group_broadcast(sg, j, 0);
 #endif
 }
 

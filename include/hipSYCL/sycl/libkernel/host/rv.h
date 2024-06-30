@@ -31,13 +31,12 @@ template<typename T>
 T rv_reduce(T, int);
 
 
-
-/*
-0: +
-1: *
-2: min
-3: max
- */
+enum class ReduceOp {
+  PLUS = 0,
+  MUL = 1,
+  MIN = 2,
+  MAX = 3,
+};
 template<typename  T>
 T __cbs_reduce(T, int);
 

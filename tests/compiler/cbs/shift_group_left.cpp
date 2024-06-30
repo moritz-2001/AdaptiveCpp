@@ -27,7 +27,7 @@ int main() {
 
             auto val = acc[item.get_global_id()];
 
-            acc[item.get_global_id()] = cl::sycl::shift_group_left(sg, val);
+            acc[item.get_global_id()] = cl::sycl::shift_group_left(g, val);
           });
     });
   }
@@ -35,7 +35,7 @@ int main() {
   std::cout << host_buf[0] << "\n";
   // CHECK: 2
   std::cout << host_buf[1] << "\n";
-  // CHECK: 0
+  // CHECK: 32
   std::cout << host_buf[31] << "\n";
   // CHECK: 33
   std::cout << host_buf[32] << "\n";
