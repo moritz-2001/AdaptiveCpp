@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <limits>
 #include <numeric>
 #include <vector>
 
@@ -238,6 +239,18 @@ BOOST_AUTO_TEST_CASE(accessor_api) {
   la1.swap(la1_copy);
   la2.swap(la2_copy);
   la3.swap(la3_copy);
+
+  // Test max_size
+  {
+    s::accessor<int, 1> acc;
+    s::host_accessor<int, 1> hacc;
+    s::local_accessor<int, 1> lacc;
+
+    const auto expected = std::numeric_limits<std::ptrdiff_t>::max();
+    BOOST_REQUIRE(acc.max_size() == expected);
+    BOOST_REQUIRE(hacc.max_size() == expected);
+    BOOST_REQUIRE(lacc.max_size() == expected);
+  }
 }
 
 BOOST_AUTO_TEST_CASE(nested_subscript) {
@@ -349,7 +362,7 @@ BOOST_AUTO_TEST_CASE(accessor_simplifications) {
     s::accessor acc1{buff, cgh, s::read_only};
     BOOST_CHECK(!acc1.is_placeholder());
     
-#ifdef HIPSYCL_EXT_ACCESSOR_VARIANT_DEDUCTION
+#ifdef ACPP_EXT_ACCESSOR_VARIANT_DEDUCTION
     // Conversion rw accessor<int> -> accessor<const int>, read-only
     s::accessor<const int> acc2 = s::accessor<int>{buff, cgh};
     s::accessor acc3{buff, cgh, s::read_only};

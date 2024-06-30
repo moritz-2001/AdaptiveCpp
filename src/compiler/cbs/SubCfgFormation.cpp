@@ -617,9 +617,10 @@ SubCFG::SubCFG(llvm::BasicBlock *EntryBarrier, llvm::AllocaInst *LastBarrierIdSt
                const llvm::DenseMap<llvm::BasicBlock *, size_t> &BarrierIds,
                const SplitterAnnotationInfo &SAA, size_t Dim, HierarchicalSplitInfo HI)
     : EntryId_(BarrierIds.lookup(EntryBarrier)), EntryBarrier_(EntryBarrier),
-      LastBarrierIdStorage_(LastBarrierIdStorage), EntryBB_(EntryBarrier->getSingleSuccessor()),
-      LoadBB_(nullptr), PreHeader_(nullptr), Dim(Dim), HI(HI) {
-  assert(HI.ContiguousIdx && "Must have found __hipsycl_cbs_local_id_{x,y,z}");
+      LastBarrierIdStorage_(LastBarrierIdStorage), ContIdx_(IndVar),
+      EntryBB_(EntryBarrier->getSingleSuccessor()), LoadBB_(nullptr), PreHeader_(nullptr),
+      Dim(Dim) {
+  assert(ContIdx_ && "Must have found __acpp_cbs_local_id_{x,y,z}");
 
   llvm::SmallVector<llvm::BasicBlock *, 4> WL{EntryBarrier};
   while (!WL.empty()) {
@@ -2130,19 +2131,13 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
 
 void createLoopsAroundKernel(llvm::Function &F, llvm::DominatorTree &DT, llvm::LoopInfo &LI,
                              llvm::PostDominatorTree &PDT, bool IsSscp) {
-#if LLVM_VERSION_MAJOR >= 13
-#define HIPSYCL_LLVM_BEFORE , true
-#else
-#define HIPSYCL_LLVM_BEFORE
-#endif
 
   auto *Body = llvm::SplitBlock(&F.getEntryBlock(), &*F.getEntryBlock().getFirstInsertionPt(), &DT,
-                                &LI, nullptr, "wibody" HIPSYCL_LLVM_BEFORE);
-  // HIPSYCL_DEBUG_EXECUTE_VERBOSE(F.viewCFG());
-#if LLVM_VERSION_MAJOR >= 13
+                                &LI, nullptr, "wibody", true);
+  HIPSYCL_DEBUG_EXECUTE_VERBOSE(F.viewCFG());
+
   Body = Body->getSingleSuccessor();
-#endif
-#undef HIPSYCL_LLVM_BEFORE
+
 
   llvm::SmallVector<llvm::BasicBlock *, 4> ExitBBs;
   llvm::BasicBlock *ExitBB = llvm::BasicBlock::Create(F.getContext(), "exit", &F);

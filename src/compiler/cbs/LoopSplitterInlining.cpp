@@ -152,7 +152,7 @@ bool fillTransitiveSplitterCallers(llvm::Function &F,
   }
 
   if (fillTransitiveSplitterCallers(Blocks, SAA, FuncsWSplitter,
-                                    InIntrinsic || F.getName().startswith("__hipsycl_sscp"))) {
+                                    InIntrinsic || F.getName().startswith("__acpp_sscp"))) {
     FuncsWSplitter.insert(&F);
     return true;
   }

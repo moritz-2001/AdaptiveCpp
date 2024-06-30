@@ -51,10 +51,6 @@
 #include "generic/hiplike/group_functions.hpp"
 #endif
 
-#if HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SPIRV
-#include "spirv/group_functions.hpp"
-#endif
-
 #if HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_HOST
 #include "host/group_functions.hpp"
 #endif
@@ -82,7 +78,7 @@ template<class Group, typename T,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T group_broadcast(Group g, T x, typename Group::linear_id_type local_linear_id = 0) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_group_broadcast, g, x,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_group_broadcast, g, x,
                                           local_linear_id);
 }
 
@@ -90,7 +86,7 @@ template<class Group, typename T,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T group_broadcast(Group g, T x, typename Group::id_type local_id) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_group_broadcast, g, x,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_group_broadcast, g, x,
                                           local_id);
 }
 
@@ -99,14 +95,14 @@ template<class Group,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 void group_barrier(Group g) {
-  HIPSYCL_DISPATCH_GROUP_ALGORITHM(__hipsycl_group_barrier, g);
+  HIPSYCL_DISPATCH_GROUP_ALGORITHM(__acpp_group_barrier, g);
 }
 
 template<class Group,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 void group_barrier(Group g, memory_scope fence_scope) {
-  HIPSYCL_DISPATCH_GROUP_ALGORITHM(__hipsycl_group_barrier, g, fence_scope);
+  HIPSYCL_DISPATCH_GROUP_ALGORITHM(__acpp_group_barrier, g, fence_scope);
 }
 
 // any_of
@@ -114,7 +110,7 @@ template <typename Group, typename Ptr, typename Predicate,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN bool joint_any_of(Group g, Ptr first, Ptr last,
                                         Predicate pred) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_any_of, g, first,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_any_of, g, first,
                                           last, pred);
 }
 
@@ -122,7 +118,7 @@ template<class Group,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 bool any_of_group(Group g, bool pred) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_any_of_group, g, pred);
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_any_of_group, g, pred);
 }
 
 
@@ -132,7 +128,7 @@ template <typename Group, typename Ptr, typename Predicate,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN bool joint_all_of(Group g, Ptr first, Ptr last,
                                         Predicate pred) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_all_of, g, first,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_all_of, g, first,
                                           last, pred);
 }
 
@@ -140,7 +136,7 @@ template<class Group,
         std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 bool all_of_group(Group g, bool pred) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_all_of_group, g, pred);
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_all_of_group, g, pred);
 }
 
 
@@ -150,7 +146,7 @@ template <typename Group, typename Ptr, typename Predicate,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN bool joint_none_of(Group g, Ptr first, Ptr last,
                                          Predicate pred) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_none_of, g, first,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_none_of, g, first,
                                           last, pred);
 }
 
@@ -158,7 +154,7 @@ template<class Group,
          std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 bool none_of_group(Group g, bool pred) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_none_of_group, g, pred);
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_none_of_group, g, pred);
 }
 
 
@@ -169,7 +165,7 @@ template <typename Group, typename Ptr, typename BinaryOperation,
 HIPSYCL_BUILTIN
 typename std::iterator_traits<Ptr>::value_type
 joint_reduce(Group g, Ptr first, Ptr last, BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_reduce, g, first,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_reduce, g, first,
                                           last, binary_op);
 }
 
@@ -177,14 +173,14 @@ template <typename Group, typename Ptr, typename T, typename BinaryOperation,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T joint_reduce(Group g, Ptr first, Ptr last, T init, BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_reduce, g, first,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_reduce, g, first,
                                           last, init, binary_op);
 }
 
 template <class Group, typename T, typename BinaryOperation,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN T reduce_over_group(Group g, T x, BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_reduce_over_group, g, x,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_reduce_over_group, g, x,
                                           binary_op);
 }
 
@@ -195,7 +191,7 @@ template <typename Group, typename InPtr, typename OutPtr, typename T,
 HIPSYCL_BUILTIN
 OutPtr joint_exclusive_scan(Group g, InPtr first, InPtr last, OutPtr result, T init,
                        BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_exclusive_scan, g,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_exclusive_scan, g,
                                           first, last, result, init, binary_op);
 }
 
@@ -205,14 +201,14 @@ template <typename Group, typename InPtr, typename OutPtr,
 HIPSYCL_BUILTIN
 OutPtr joint_exclusive_scan(Group g, InPtr first, InPtr last, OutPtr result,
                             BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_exclusive_scan, g,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_exclusive_scan, g,
                                           first, last, result, binary_op);
 }
 
 template<class Group, typename V, typename T, typename BinaryOperation>
 HIPSYCL_BUILTIN
 T exclusive_scan_over_group(Group g, V x, T init, BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_exclusive_scan_over_group,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_exclusive_scan_over_group,
                                           g, x, init, binary_op);
 }
 
@@ -220,7 +216,7 @@ template<typename Group, typename T, typename BinaryOperation,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T exclusive_scan_over_group(Group g, T x, BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_exclusive_scan_over_group,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_exclusive_scan_over_group,
                                           g, x, binary_op);
 }
 
@@ -230,7 +226,7 @@ template <typename Group, typename InPtr, typename OutPtr, typename T,
 HIPSYCL_BUILTIN
 OutPtr joint_inclusive_scan(Group g, InPtr first, InPtr last, OutPtr result,
                        BinaryOperation binary_op, T init) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_inclusive_scan, g,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_inclusive_scan, g,
                                           first, last, result, binary_op, init);
 }
 
@@ -240,7 +236,7 @@ template <typename Group, typename InPtr, typename OutPtr,
 HIPSYCL_BUILTIN
 OutPtr joint_inclusive_scan(Group g, InPtr first, InPtr last, OutPtr result,
                             BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_joint_inclusive_scan, g,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_joint_inclusive_scan, g,
                                           first, last, result, binary_op);
 }
 
@@ -248,7 +244,7 @@ template<class Group, class T, typename BinaryOperation,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T inclusive_scan_over_group(Group g, T x, BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_inclusive_scan_over_group,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_inclusive_scan_over_group,
                                           g, x, binary_op);
 }
 
@@ -256,7 +252,7 @@ template<typename Group, typename V, typename T, typename BinaryOperation,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T inclusive_scan_over_group(Group g, V x, T init, BinaryOperation binary_op) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_inclusive_scan_over_group,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_inclusive_scan_over_group,
                                           g, x, init, binary_op);
 }
 
@@ -265,7 +261,7 @@ template<class Group, typename T,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T shift_group_left(Group g, T x, typename Group::linear_id_type delta = 1) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_shift_group_left, g, x,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_shift_group_left, g, x,
                                           delta);
 }
 
@@ -274,7 +270,7 @@ template<class Group, typename T,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T shift_group_right(Group g, T x, typename Group::linear_id_type delta = 1) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_shift_group_right, g, x,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_shift_group_right, g, x,
                                           delta);
 }
 
@@ -283,7 +279,7 @@ template<class Group, typename T,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T permute_group_by_xor(Group g, T x, typename Group::linear_id_type mask) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_permute_group_by_xor, g, x,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_permute_group_by_xor, g, x,
                                           mask);
 }
 
@@ -293,7 +289,7 @@ template<class Group, typename T,
           std::enable_if_t<is_group_v<std::decay_t<Group>>, bool> = true>
 HIPSYCL_BUILTIN
 T select_from_group(Group g, T x, typename Group::id_type remote_local_id) {
-  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__hipsycl_select_from_group, g, x,
+  HIPSYCL_RETURN_DISPATCH_GROUP_ALGORITHM(__acpp_select_from_group, g, x,
                                           remote_local_id);
 }
 

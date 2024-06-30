@@ -41,7 +41,7 @@ const instrumentation_set &operation::get_instrumentations() const {
 }
 
 kernel_operation::kernel_operation(
-    const std::string &kernel_name,
+    const char* kernel_name,
     common::auto_small_vector<
         std::unique_ptr<backend_kernel_launcher>> kernels,
     const requirements_list &reqs)
@@ -130,7 +130,7 @@ void *memory_location::get_base_ptr() const {
       return _data_region->get_memory(_dev);
     } else {
       register_error(
-          __hipsycl_here(),
+          __acpp_here(),
           error_info{"memory_location: Was configured as data_region-based "
                      "memory location, but data_region did not have allocation "
                      "on the requested device"});

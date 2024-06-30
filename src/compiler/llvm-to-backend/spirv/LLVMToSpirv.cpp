@@ -60,7 +60,7 @@ namespace compiler {
 
 namespace {
 
-static const char* DynamicLocalMemArrayName = "__hipsycl_sscp_spirv_dynamic_local_mem";
+static const char* DynamicLocalMemArrayName = "__acpp_sscp_spirv_dynamic_local_mem";
 
 void appendIntelLLVMSpirvOptions(llvm::SmallVector<std::string>& out) {
   llvm::SmallVector<std::string> Args {"-spirv-max-version=1.3",
@@ -127,8 +127,7 @@ bool removeDynamicLocalMemorySupport(llvm::Module& M) {
 }
 
 LLVMToSpirvTranslator::LLVMToSpirvTranslator(const std::vector<std::string> &KN)
-    : LLVMToBackendTranslator{sycl::jit::backend::spirv, KN}, KernelNames{KN} {}
-
+    : LLVMToBackendTranslator{sycl::jit::backend::spirv, KN, KN}, KernelNames{KN} {}
 
 bool LLVMToSpirvTranslator::toBackendFlavor(llvm::Module &M, PassHandler& PH) {
   
@@ -267,6 +266,7 @@ bool LLVMToSpirvTranslator::translateToBackendFormat(llvm::Module &FlavoredModul
   if(UseIntelLLVMSpirvArgs)
     appendIntelLLVMSpirvOptions(Args);
   else {
+    Args.push_back("-spirv-max-version=1.3");
     Args.push_back("-spirv-ext=+SPV_EXT_relaxed_printf_string_address_space");
   }
 

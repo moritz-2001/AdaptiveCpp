@@ -76,11 +76,8 @@
 #include "libkernel/sub_group.hpp"
 #include "libkernel/group_traits.hpp"
 #include "libkernel/memory.hpp"
-#if !HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SPIRV
-// Not yet supported for SPIR-V
 #include "libkernel/group_functions.hpp"
 #include "libkernel/group_functions_alias.hpp"
-#endif
 #include "libkernel/functional.hpp"
 #include "libkernel/reduction.hpp"
 
@@ -99,6 +96,7 @@
 #include "backend_interop.hpp"
 #include "interop_handle.hpp"
 #include "buffer_explicit_behavior.hpp"
+#include "specialized.hpp"
 
 // Support SYCL_EXTERNAL for SSCP - we cannot have SYCL_EXTERNAL if accelerated CPU
 // is active at the same time :(

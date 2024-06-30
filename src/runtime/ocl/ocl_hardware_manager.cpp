@@ -59,8 +59,24 @@ ResultT info_query(const cl::Device& dev) {
   cl_int err = dev.getInfo(Query, &r);
   if(err != CL_SUCCESS) {
     register_error(
-          __hipsycl_here(),
+          __acpp_here(),
           error_info{"ocl_hardware_context: Could not obtain device info",
+                    error_code{"CL", err}});
+  }
+  return r;
+}
+
+template<int Query, class ResultT>
+ResultT platform_info_query(const cl::Device& dev) {
+  cl_platform_id platform = info_query<CL_DEVICE_PLATFORM, cl_platform_id>(dev);
+  cl::Platform p{platform};
+
+  ResultT r{};
+  cl_int err = p.getInfo(Query, &r);
+  if(err != CL_SUCCESS) {
+    register_error(
+          __acpp_here(),
+          error_info{"ocl_hardware_context: Could not obtain platform info",
                     error_code{"CL", err}});
   }
   return r;
@@ -100,7 +116,7 @@ bool should_include_platform(const std::string& platform_name, const cl::Platfor
   std::string ocl_version;
   cl_int err = p.getInfo(CL_PLATFORM_VERSION, &ocl_version);
   if (err != CL_SUCCESS) {
-    print_warning(__hipsycl_here(),
+    print_warning(__acpp_here(),
                   error_info{"ocl_hardware_manager: Could not retrieve OpenCL "
                              "version for platform " +
                                  platform_name,
@@ -173,7 +189,14 @@ bool should_include_device(const std::string& dev_name, const cl::Device& dev) {
 ocl_hardware_context::ocl_hardware_context(const cl::Device &dev,
                                            const cl::Context &ctx, int dev_id,
                                            int platform_id)
-    : _dev_id{dev_id}, _platform_id{platform_id}, _ctx{ctx}, _dev{dev}, _alloc{} {}
+    : _dev_id{dev_id}, _platform_id{platform_id}, _ctx{ctx}, _dev{dev},
+      _alloc{}, _has_intel_extension_profile{false} {
+  std::string platform_name =
+      platform_info_query<CL_PLATFORM_NAME, std::string>(_dev);
+
+  if(platform_name == "Intel(R) OpenCL Graphics" || platform_name == "Intel(R) OpenCL")
+    _has_intel_extension_profile = true;
+}
 
 bool ocl_hardware_context::is_cpu() const {
   return info_query<CL_DEVICE_TYPE, cl_device_type>(_dev) & CL_DEVICE_TYPE_CPU;
@@ -201,6 +224,10 @@ std::string ocl_hardware_context::get_vendor_name() const {
 
 std::string ocl_hardware_context::get_device_arch() const {
   return "OpenCL " + info_query<CL_DEVICE_OPENCL_C_VERSION, std::string>(_dev);
+}
+
+bool ocl_hardware_context::has_intel_extension_profile() const {
+  return _has_intel_extension_profile;
 }
 
 bool ocl_hardware_context::has(device_support_aspect aspect) const {
@@ -546,7 +573,7 @@ ocl_hardware_manager::ocl_hardware_manager()
   cl_int err = cl::Platform::get(&platforms);
   if(err != CL_SUCCESS) {
     print_warning(
-          __hipsycl_here(),
+          __acpp_here(),
           error_info{"ocl_hardware_manager: Could not obtain platform list",
                     error_code{"CL", err}});
     platforms.clear();
@@ -559,7 +586,7 @@ ocl_hardware_manager::ocl_hardware_manager()
     err = p.getInfo(CL_PLATFORM_NAME, &platform_name);
     if(err != CL_SUCCESS) {
       print_warning(
-          __hipsycl_here(),
+          __acpp_here(),
           error_info{"ocl_hardware_manager: Could not retrieve platform name",
                     error_code{"CL", err}});
     }
@@ -578,7 +605,7 @@ ocl_hardware_manager::ocl_hardware_manager()
                          &devs);
       if (err != CL_SUCCESS) {
         print_warning(
-            __hipsycl_here(),
+            __acpp_here(),
             error_info{
                 "ocl_hardware_manager: Could not list devices of platform",
                 error_code{"CL", err}});
@@ -596,7 +623,7 @@ ocl_hardware_manager::ocl_hardware_manager()
             platform_ctx = ctx;
           else {
             print_warning(
-                __hipsycl_here(),
+                __acpp_here(),
                 error_info{"ocl_hardware_manager: Shared context construction "
                            "failed. Will attempt to fall back to individual "
                            "context per device, but this may prevent data "
@@ -605,7 +632,7 @@ ocl_hardware_manager::ocl_hardware_manager()
           }
         } else {
           print_warning(
-              __hipsycl_here(),
+              __acpp_here(),
               error_info{
                   "ocl_hardware_manager: Not constructing shared context "
                   "across devices. Note that this may prevent data "
@@ -626,7 +653,7 @@ ocl_hardware_manager::ocl_hardware_manager()
               if (err == CL_SUCCESS)
                 chosen_context = ctx;
               else {
-                print_error(__hipsycl_here(),
+                print_error(__acpp_here(),
                             error_info{"ocl_hardware_manager: Individual context "
                                       "creation failed",
                                       error_code{"CL", err}});

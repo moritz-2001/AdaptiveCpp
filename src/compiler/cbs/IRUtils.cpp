@@ -231,12 +231,7 @@ bool checkedInlineFunction(llvm::CallBase *CI, llvm::StringRef PassPrefix, int N
   const auto CalleeName = CI->getCalledFunction()->getName().str();
 
   llvm::InlineFunctionInfo IFI;
-#if LLVM_VERSION_MAJOR <= 10
-  llvm::InlineResult ILR = llvm::InlineFunction(CI, IFI, nullptr);
-  if (!static_cast<bool>(ILR)) {
-    HIPSYCL_DEBUG_WARNING << PassPrefix << " failed to inline function <" << calleeName << ">: '"
-                          << ILR.message << "'\n";
-#else
+
   llvm::InlineResult ILR = llvm::InlineFunction(*CI, IFI);
   if (!ILR.isSuccess()) {
     HIPSYCL_DEBUG_STREAM(NoInlineDebugLevel, (NoInlineDebugLevel >= HIPSYCL_DEBUG_LEVEL_INFO
@@ -244,7 +239,7 @@ bool checkedInlineFunction(llvm::CallBase *CI, llvm::StringRef PassPrefix, int N
                                                   : HIPSYCL_DEBUG_PREFIX_WARNING))
         << PassPrefix << " failed to inline function <" << CalleeName << ">: '"
         << ILR.getFailureReason() << "'\n";
-#endif
+
     return false;
   }
 
@@ -426,12 +421,7 @@ llvm::BasicBlock *simplifyLatch(const llvm::Loop *L, llvm::BasicBlock *Latch, ll
 llvm::BasicBlock *splitEdge(llvm::BasicBlock *Root, llvm::BasicBlock *&Target, llvm::LoopInfo *LI,
                             llvm::DominatorTree *DT) {
   auto *NewBlockAtEdge = llvm::SplitEdge(Root, Target, DT, LI, nullptr);
-#if LLVM_VERSION_MAJOR < 12
-  // NewBlockAtEdge should be between Root and Target
-  // SplitEdge behaviour was fixed in LLVM 12 to actually ensure this.
-  if (NewBlockAtEdge->getTerminator()->getSuccessor(0) != Target)
-    std::swap(NewBlockAtEdge, Target);
-#endif
+
   assert(NewBlockAtEdge->getTerminator()->getSuccessor(0) == Target &&
          "NewBlockAtEdge must be predecessor to Target");
   return NewBlockAtEdge;
@@ -624,11 +614,7 @@ void copyDgbValues(llvm::Value *From, llvm::Value *To, llvm::Instruction *Insert
 }
 
 void dropDebugLocation(llvm::Instruction &I) {
-#if LLVM_VERSION_MAJOR >= 12
   I.dropLocation();
-#else
-  I.setDebugLoc({});
-#endif
 }
 
 void dropDebugLocation(llvm::BasicBlock *BB) {

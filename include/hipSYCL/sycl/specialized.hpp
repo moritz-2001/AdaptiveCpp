@@ -1,7 +1,7 @@
 /*
  * This file is part of hipSYCL, a SYCL implementation based on CUDA/HIP
  *
- * Copyright (c) 2021 Aksel Alpay
+ * Copyright (c) 2018-2024 Aksel Alpay and contributors
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -26,40 +26,58 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef HIPSYCL_LIBKERNEL_SPIRV_BACKEND_HPP
-#define HIPSYCL_LIBKERNEL_SPIRV_BACKEND_HPP
+#ifndef HIPSYCL_SPECIALIZED_HPP
+#define HIPSYCL_SPECIALIZED_HPP
 
-#if defined(__HIPSYCL_SPIRV__)
- #define HIPSYCL_LIBKERNEL_COMPILER_SUPPORTS_SPIRV 1
+#include <type_traits>
 
- #ifdef __HIPSYCL_ENABLE_SPIRV_TARGET__
-  // Needed for SPIR-V headers
-  #ifndef SYCL_EXTERNAL
-   #define SYCL_EXTERNAL
-  #endif
+namespace hipsycl {
+namespace sycl {
 
-  #include "spirv_ops.hpp"
-  #include "spirv_vars.hpp"
-  #include "spirv_types.hpp"
- #endif
-#else
- #define HIPSYCL_LIBKERNEL_COMPILER_SUPPORTS_SPIRV 0
-#endif
+namespace detail {
 
-#if defined(__HIPSYCL_SPIRV__)
- #define HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SPIRV 1
+template <class T>
+struct __acpp_sscp_emit_param_type_annotation_specialized {
+  T value;
+};
 
- #ifndef HIPSYCL_LIBKERNEL_DEVICE_PASS
-  #define HIPSYCL_LIBKERNEL_DEVICE_PASS
- #endif
+} // namespace detail
 
- #define HIPSYCL_UNIVERSAL_TARGET
- #define HIPSYCL_KERNEL_TARGET
- #define HIPSYCL_HOST_TARGET
+template <class T> class specialized {
+public:
+  template <typename U = T, typename = std::enable_if_t<
+                                std::is_default_constructible<U>::value>>
+  specialized() : _value{} {}
 
- #define HIPSYCL_ONDEMAND_ITERATION_SPACE_INFO
-#else
- #define HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SPIRV 0
-#endif
+  specialized(const T &value) : _value{value} {}
+
+  specialized(const specialized<T> &other) : _value{other._value.value} {}
+
+  specialized(sycl::specialized<T> &&other) { swap(*this, other); }
+
+  specialized<T> &operator=(const T &value) {
+    sycl::specialized<T> tmp{value};
+    swap(*this, tmp);
+    return *this;
+  }
+
+  specialized<T> &operator=(specialized<T> other) {
+    swap(*this, other);
+    return *this;
+  }
+
+  friend void swap(specialized<T> &first, specialized<T> &second) {
+    using std::swap;
+    swap(first._value.value, second._value.value);
+  }
+
+  operator T() const { return _value.value; }
+
+private:
+  detail::__acpp_sscp_emit_param_type_annotation_specialized<T> _value;
+};
+
+} // namespace sycl
+} // namespace hipsycl
 
 #endif

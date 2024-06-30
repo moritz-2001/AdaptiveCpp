@@ -28,33 +28,29 @@
 #include "hipSYCL/sycl/libkernel/sscp/builtins/subgroup.hpp"
 #include "hipSYCL/sycl/libkernel/sscp/builtins/core.hpp"
 
-extern "C" size_t __hipsycl_cbs_local_id_subgroup;
-
-HIPSYCL_SSCP_BUILTIN __hipsycl_uint32 __hipsycl_sscp_get_subgroup_local_id() {
-  return __hipsycl_cbs_local_id_subgroup;
+HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_local_id() {
+  return 0;
 }
 
-HIPSYCL_SSCP_BUILTIN __hipsycl_uint32 __hipsycl_sscp_get_subgroup_size() {
-  // TODO wrong for incomplete subgroups
-  return 32;
+HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_size() {
+  return 1;
 }
 
-HIPSYCL_SSCP_BUILTIN __hipsycl_uint32 __hipsycl_sscp_get_subgroup_max_size() {
-  return 32;
+HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_max_size() {
+  return 1;
 }
 
-HIPSYCL_SSCP_BUILTIN __hipsycl_uint32 __hipsycl_sscp_get_subgroup_id() {
+HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_id() {
   size_t local_tid =
-      __hipsycl_sscp_get_local_id_x() +
-      __hipsycl_sscp_get_local_id_y() * (__hipsycl_sscp_get_local_size_x() +
-      __hipsycl_sscp_get_local_id_z() * __hipsycl_sscp_get_local_size_x());
-  return local_tid / __hipsycl_sscp_get_subgroup_max_size();
+      __acpp_sscp_get_local_id_x() +
+      __acpp_sscp_get_local_id_y() * (__acpp_sscp_get_local_size_x() +
+      __acpp_sscp_get_local_id_z() * __acpp_sscp_get_local_size_x());
+  return local_tid;
 }
 
-HIPSYCL_SSCP_BUILTIN __hipsycl_uint32 __hipsycl_sscp_get_num_subgroups() {
-  auto wg_size = __hipsycl_sscp_get_local_size_x() *
-                 __hipsycl_sscp_get_local_size_y() *
-                 __hipsycl_sscp_get_local_size_z();
-
-  return (wg_size + __hipsycl_sscp_get_subgroup_max_size()-1) / __hipsycl_sscp_get_subgroup_max_size();
+HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_num_subgroups() {
+  auto wg_size = __acpp_sscp_get_local_size_x() *
+                 __acpp_sscp_get_local_size_y() *
+                 __acpp_sscp_get_local_size_z();
+  return wg_size;
 }

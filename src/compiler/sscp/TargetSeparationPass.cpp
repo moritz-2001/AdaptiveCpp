@@ -119,11 +119,11 @@ static llvm::cl::opt<bool> PreoptimizeSSCPKernels{
         "Preoptimize SYCL kernels in LLVM IR instead of embedding unoptimized kernels and relying "
         "on optimization at runtime. This is mainly for hipSYCL developers and NOT supported!"}};
 
-static const char *SscpIsHostIdentifier = "__hipsycl_sscp_is_host";
-static const char *SscpIsDeviceIdentifier = "__hipsycl_sscp_is_device";
-static const char *SscpHcfObjectIdIdentifier = "__hipsycl_local_sscp_hcf_object_id";
-static const char *SscpHcfObjectSizeIdentifier = "__hipsycl_local_sscp_hcf_object_size";
-static const char *SscpHcfContentIdentifier = "__hipsycl_local_sscp_hcf_content";
+static const char *SscpIsHostIdentifier = "__acpp_sscp_is_host";
+static const char *SscpIsDeviceIdentifier = "__acpp_sscp_is_device";
+static const char *SscpHcfObjectIdIdentifier = "__acpp_local_sscp_hcf_object_id";
+static const char *SscpHcfObjectSizeIdentifier = "__acpp_local_sscp_hcf_object_size";
+static const char *SscpHcfContentIdentifier = "__acpp_local_sscp_hcf_content";
 
 template<class IntT>
 IntT generateRandomNumber() {
@@ -148,6 +148,7 @@ struct KernelParam {
   std::size_t ArgByteOffset;
   std::size_t OriginalArgIndex;
   ParamType Type;
+  llvm::SmallVector<std::string> Annotations;
 };
 
 struct KernelInfo {
@@ -190,6 +191,7 @@ struct KernelInfo {
         KP.Type = PT;
         KP.ArgByteOffset = OriginalParamInfos[i].OffsetInOriginalParam;
         KP.OriginalArgIndex = OriginalParamInfos[i].OriginalParamIndex;
+        KP.Annotations = OriginalParamInfos[i].Annotations;
         this->Parameters.push_back(KP);
       }
     }
@@ -396,6 +398,11 @@ generateHCF(llvm::Module &DeviceModule, std::size_t HcfObjectId,
         TypeDescription = "other-by-value";
       }
       P->set("type", TypeDescription);
+
+      auto* AnnotationsNode = P->add_subnode("annotations");
+      for(const auto& A : ParamInfo.Annotations) {
+        AnnotationsNode->set(A, "1");
+      }
     }
   }
   

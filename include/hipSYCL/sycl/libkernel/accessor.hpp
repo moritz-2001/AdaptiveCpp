@@ -31,6 +31,7 @@
 
 #include <exception>
 #include <iterator>
+#include <limits>
 #include <memory>
 #include <type_traits>
 #include <cassert>
@@ -994,12 +995,17 @@ public:
     return !(lhs == rhs);
   }
 
-  std::size_t hipSYCL_hash_code() const {
+  std::size_t AdaptiveCpp_hash_code() const {
     // TODO: This only really guarantees unique hash codes
     // outside of kernels, on the host side.
     // Once on device, the UID will contain the device pointer
     // which might be aliased by multiple accessors.
-    return get_uid().hipSYCL_hash_code();
+    return get_uid().AdaptiveCpp_hash_code();
+  }
+
+  [[deprecated("Use AdaptiveCpp_hash_code()")]]
+  auto hipSYCL_hash_code() const {
+    return AdaptiveCpp_hash_code();
   }
 
   HIPSYCL_UNIVERSAL_TARGET
@@ -1052,7 +1058,10 @@ public:
     return get_count();
   }
 
-  //size_type max_size() const noexcept;
+  size_type max_size() const noexcept {
+    return std::numeric_limits<difference_type>::max();
+  }
+
   template <bool IsAllowed = has_size_queries,
             std::enable_if_t<IsAllowed, int> = 0>
   bool empty() const noexcept {
@@ -1262,7 +1271,7 @@ private:
     bind_to_buffer(buff, offset, access_range);
 
     if (accessTarget == access::target::host_buffer) {
-      init_host_buffer(buff.hipSYCL_runtime(), is_no_init_access);
+      init_host_buffer(buff.AdaptiveCpp_runtime(), is_no_init_access);
     }
   }
   
@@ -1335,7 +1344,7 @@ private:
   void bind_to_buffer(BufferType &buff,
                       sycl::id<adj_dimensions> accessOffset,
                       sycl::range<adj_dimensions> accessRange) {
-    __hipsycl_if_target_host(
+    __acpp_if_target_host(
       auto buffer_region = detail::extract_buffer_data_region(buff);
       this->detail::accessor::
           conditional_buffer_pointer_storage<has_buffer_pointer>::attempt_set(
@@ -1501,7 +1510,7 @@ using unranged_placeholder_accessor =
     accessor<T, Dim, M, Tgt, accessor_variant::unranged_placeholder>;
 
 // Accessor deduction guides
-#ifdef HIPSYCL_EXT_ACCESSOR_VARIANT_DEDUCTION
+#ifdef ACPP_EXT_ACCESSOR_VARIANT_DEDUCTION
  #define HIPSYCL_ACCESSOR_VARIANT_SELECTOR(tag, fallback, optimized) \
   detail::deduce_accessor_variant(tag, optimized)
 #else
@@ -1749,7 +1758,9 @@ public:
     return _impl.get_count();
   }
 
-  //size_type max_size() const noexcept;
+  size_type max_size() const noexcept {
+    return std::numeric_limits<difference_type>::max();
+  }
 
   bool empty() const noexcept {
     return size() == 0;
@@ -1833,8 +1844,13 @@ public:
     return const_reverse_iterator(cbegin());
   }
 
-  std::size_t hipSYCL_hash_code() const {
-    return _impl.hipSYCL_hash_code();
+  std::size_t AdaptiveCpp_hash_code() const {
+    return _impl.AdaptiveCpp_hash_code();
+  }
+
+  [[deprecated("Use AdaptiveCpp_hash_code()")]]
+  auto hipSYCL_hash_code() const {
+    return AdaptiveCpp_hash_code();
   }
 
 private:
@@ -1950,8 +1966,13 @@ public:
     return !(lhs == rhs);
   }
 
-  std::size_t hipSYCL_hash_code() const {
+  std::size_t AdaptiveCpp_hash_code() const {
     return _addr;
+  }
+
+  [[deprecated("Use AdaptiveCpp_hash_code()")]]
+  auto hipSYCL_hash_code() const {
+    return AdaptiveCpp_hash_code();
   }
 
   [[deprecated("get_size() was removed for SYCL 2020, use byte_size() instead")]]
@@ -1980,7 +2001,10 @@ public:
     return _num_elements.size();
   }
 
-  // size_type max_size() const noexcept;
+  size_type max_size() const noexcept
+  {
+    return std::numeric_limits<difference_type>::max();
+  }
 
   range<dimensions> get_range() const
   {
@@ -2143,7 +2167,7 @@ struct hash<hipsycl::sycl::accessor<dataT, dimensions, accessmode, accessTarget,
   std::size_t
   operator()(const hipsycl::sycl::accessor<dataT, dimensions, accessmode, accessTarget,
                                     AccessorVariant> &acc) const {
-    return acc.hipSYCL_hash_code();
+    return acc.AdaptiveCpp_hash_code();
   }
 };
 // accessor also covers the local_accessor specialization
@@ -2153,7 +2177,7 @@ struct hash<hipsycl::sycl::host_accessor<dataT, dimensions, A>> {
 
   std::size_t operator()(
       const hipsycl::sycl::host_accessor<dataT, dimensions, A> &acc) const {
-    return acc.hipSYCL_hash_code();
+    return acc.AdaptiveCpp_hash_code();
   }
 };
 
