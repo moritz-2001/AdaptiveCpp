@@ -51,15 +51,18 @@ struct MDKind {
 
 namespace cbs {
 static constexpr const char BarrierIntrinsicName[] = "__acpp_cbs_barrier";
-static constexpr const char SubBarrierIntrinsicName[] = "__hipsycl_cbs_sub_barrier";
+static constexpr const char SubBarrierIntrinsicName[] = "__acpp_cbs_sub_barrier";
 
 static constexpr const char LocalIdGlobalNameX[] = "__acpp_cbs_local_id_x";
 static constexpr const char LocalIdGlobalNameY[] = "__acpp_cbs_local_id_y";
 static constexpr const char LocalIdGlobalNameZ[] = "__acpp_cbs_local_id_z";
-static const std::array<const char *, 3> LocalIdGlobalNames{LocalIdGlobalNameX, LocalIdGlobalNameY,
+static constexpr std::array<const char *, 3> LocalIdGlobalNames{LocalIdGlobalNameX, LocalIdGlobalNameY,
                                                             LocalIdGlobalNameZ};
 
 static constexpr const char SgIdGlobalName[] = "__hipsycl_cbs_local_id_subgroup";
+
+static constexpr std::string_view WorkGroupSharedMemory = "work_group_shared_memory";
+static constexpr std::string_view SubGroupSharedMemory = "sub_group_shared_memory";
 
 static constexpr const char LocalSizeGlobalNameX[] = "__acpp_cbs_local_size_x";
 static constexpr const char LocalSizeGlobalNameY[] = "__acpp_cbs_local_size_y";

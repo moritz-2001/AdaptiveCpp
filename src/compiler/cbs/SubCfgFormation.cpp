@@ -403,14 +403,15 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     HIPSYCL_DEBUG_ERROR << "ICMP " << *LocalSize[D] << " " << *IncIndVar << "\n";
     llvm::Value *LoopCond = Builder.CreateICmpULT(IncIndVar, LocalSize[D], "exit.cond." + Suffix);
 
-    // TODO ADD IF NOT RV
-    // if (HI.IsSub) {
-    //   assert(D == InnerMost);
-    // TODO don't we need to multiply the local sizes?
-    //   auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
-    //                                          "exit.cont_cond." + Suffix);
-    //   LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
-    // }
+#ifndef RV
+    if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
+      assert(D == InnerMost);
+      // TODO don't we need to multiply the local sizes?
+      auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
+                                             "exit.cont_cond." + Suffix);
+      LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
+    }
+#endif
 
     Builder.CreateCondBr(LoopCond, Header, AfterBB);
     Latches.push_back(Latch);
@@ -2065,13 +2066,6 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
     for (auto &Cfg : SubCFGs) {
       formSubgroupCfgs(Cfg, F, SAA, IsSscp, Dim, LocalSize, HI);
     }
-
-    // Replace intrinsic with identity, if x does not span multiple sub-groups
-    llvm::SmallVector<llvm::CallInst *, 8> ToReplaceIntrinsics = getExtractIntrinsics(F);
-    for (auto *Intrinsic : ToReplaceIntrinsics) {
-      Intrinsic->replaceAllUsesWith(Intrinsic->getOperand(0));
-      Intrinsic->eraseFromParent();
-    }
   }
 
   /* TODO
@@ -2120,6 +2114,32 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
        {},
        IndVar,
        nullptr});
+
+  for (auto i = Dim; i < 3; ++i) {
+    auto *Load = mergeGVLoadsInEntry(F, LocalIdGlobalNames[i]);
+    Load->replaceAllUsesWith(Builder.getIntN(64, 0));
+    Load->eraseFromParent();
+  }
+
+  {
+    Builder.SetInsertPoint(F.getEntryBlock().getTerminator());
+    auto* Alloca = Builder.CreateAlloca(
+        llvm::IntegerType::getInt8Ty(F.getContext()),
+        Builder.getIntN(64, 1024 * 1024));
+    auto *Load = mergeGVLoadsInEntry(F, WorkGroupSharedMemory);
+    Load->replaceAllUsesWith(Alloca);
+    Load->eraseFromParent();
+  }
+  {
+    Builder.SetInsertPoint(F.getEntryBlock().getTerminator());
+    auto* Alloca = Builder.CreateAlloca(
+        llvm::IntegerType::getInt8Ty(F.getContext()),
+        Builder.getIntN(64, 1024 * 1024 / 32));
+    auto *Load = mergeGVLoadsInEntry(F, SubGroupSharedMemory);
+    Load->replaceAllUsesWith(Alloca);
+    Load->eraseFromParent();
+  }
+  // F.viewCFG();
 
   // The dummy induction variable can now be removed. It should not have any users.
   {

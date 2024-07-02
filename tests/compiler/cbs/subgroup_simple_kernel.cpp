@@ -5,8 +5,8 @@
 #include <iostream>
 
 int main() {
-  constexpr size_t local_size = 32;
-  constexpr size_t global_size = 32;
+  constexpr size_t local_size = 12;
+  constexpr size_t global_size = 12;
 
   std::vector<int> host_buf(global_size, 0);
   std::iota(host_buf.begin(), host_buf.end(), 0);
@@ -26,10 +26,10 @@ int main() {
             const auto sg = item.get_sub_group();
             auto val = acc[item.get_global_id()];
             cl::sycl::group_barrier(sg);
+            acc[item.get_global_id()] = cl::sycl::group_broadcast(g, val, 2);
           });
     });
   }
-
-  // CHECK: 1
+  std::cout << host_buf[0] << "\n";
   std::cout << host_buf[1] << "\n";
 }

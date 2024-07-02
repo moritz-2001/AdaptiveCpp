@@ -39,6 +39,7 @@ namespace compiler {
 
 // collects all functions annotated as nd-range kernels or barriers.
 class SplitterAnnotationInfo {
+  // TODO CHANGED NAME of barriers?
   static constexpr const char *SplitterAnnotation = "hipsycl_barrier";
   static constexpr const char *SubSplitterAnnotation = "hipsycl_sub_barrier";
   static constexpr const char *KernelAnnotation = "hipsycl_nd_kernel";

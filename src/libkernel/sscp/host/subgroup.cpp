@@ -26,31 +26,60 @@
  */
 
 #include "hipSYCL/sycl/libkernel/sscp/builtins/subgroup.hpp"
+#include "hipSYCL/compiler/cbs/IRUtils.hpp"
+#include "hipSYCL/sycl/libkernel/host/rv.h"
 #include "hipSYCL/sycl/libkernel/sscp/builtins/core.hpp"
 
+#define RV
+
+extern "C" size_t __hipsycl_cbs_local_id_subgroup;
+
+// TODO RV
+
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_local_id() {
-  return 0;
+#ifdef RV
+  return rv_lane_id();
+#else
+
+  return __hipsycl_cbs_local_id_subgroup;
+#endif
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_size() {
-  return 1;
+#ifdef RV
+  return rv_num_lanes();
+#else
+  if (const bool lastGroup = __acpp_sscp_get_num_subgroups() - 1 == __acpp_sscp_get_subgroup_id();
+      not lastGroup) {
+    return __acpp_sscp_get_subgroup_max_size();
+  }
+  const auto wg_size = __acpp_sscp_get_local_size_x() * __acpp_sscp_get_local_size_y() *
+                       __acpp_sscp_get_local_size_z();
+
+  return wg_size - (__acpp_sscp_get_num_subgroups() - 1) * __acpp_sscp_get_subgroup_max_size();
+#endif
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_max_size() {
-  return 1;
+#ifdef RV
+  return rv_num_lanes();
+#else
+  return hipsycl::compiler::SGSize;
+#endif
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_id() {
-  size_t local_tid =
-      __acpp_sscp_get_local_id_x() +
-      __acpp_sscp_get_local_id_y() * (__acpp_sscp_get_local_size_x() +
-      __acpp_sscp_get_local_id_z() * __acpp_sscp_get_local_size_x());
-  return local_tid;
+  const size_t local_tid = __acpp_sscp_get_local_id_x() +
+                           __acpp_sscp_get_local_id_y() *
+                               (__acpp_sscp_get_local_size_x() +
+                                __acpp_sscp_get_local_id_z() * __acpp_sscp_get_local_size_x());
+
+  return local_tid / __acpp_sscp_get_subgroup_max_size();
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_num_subgroups() {
-  auto wg_size = __acpp_sscp_get_local_size_x() *
-                 __acpp_sscp_get_local_size_y() *
-                 __acpp_sscp_get_local_size_z();
-  return wg_size;
+  const auto wg_size = __acpp_sscp_get_local_size_x() * __acpp_sscp_get_local_size_y() *
+                       __acpp_sscp_get_local_size_z();
+  // Round up
+  return (wg_size + __acpp_sscp_get_subgroup_max_size() - 1) / __acpp_sscp_get_subgroup_max_size();
 }

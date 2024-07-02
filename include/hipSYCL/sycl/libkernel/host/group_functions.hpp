@@ -128,11 +128,11 @@ HIPSYCL_KERNEL_TARGET T
 __acpp_group_broadcast(sub_group g, T x, typename sub_group::linear_id_type local_linear_id = 0) {
   static_assert(std::is_trivially_copyable_v<T>);
 #ifdef RV
-  return extract_impl(x, local_id);
+  return extract_impl(x, local_linear_id);
 #else
   if constexpr (std::is_fundamental_v<T>) {
     __acpp_group_barrier(g);
-    T tmp = __cbs_extract(x, local_linear_id);
+    T tmp = {};//__cbs_extract(x, local_linear_id);
     __acpp_group_barrier(g);
     return tmp;
   } else {
@@ -206,7 +206,7 @@ inline bool __acpp_any_of_group(sub_group g, bool pred) {
 #else
   __acpp_group_barrier(g);
   // TODO does this work?
-  const bool max = __cbs_reduce(pred, static_cast<int>(ReduceOp::MAX));
+  const bool max = {}; //__cbs_reduce(pred, static_cast<int>(ReduceOp::MAX));
   __acpp_group_barrier(g);
   return max;
 #endif
@@ -263,7 +263,7 @@ inline bool __acpp_all_of_group(sub_group g, bool pred) {
 #else
   __acpp_group_barrier(g);
   // TODO does this work?
-  const bool min = __cbs_reduce(pred, static_cast<int>(ReduceOp::MIN));
+  const bool min = {};//__cbs_reduce(pred, static_cast<int>(ReduceOp::MIN));
   __acpp_group_barrier(g);
   return min;
 #endif
@@ -413,7 +413,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_reduce_over_group(sub_group g, T x, BinaryOperati
 #else
   if constexpr (op >= 0) {
     __acpp_group_barrier(g);
-    T tmp = __cbs_reduce(x, op);
+    T tmp = {};//__cbs_reduce(x, op);
     __acpp_group_barrier(g);
     return tmp;
   } else {
@@ -685,8 +685,9 @@ HIPSYCL_KERNEL_TARGET T __acpp_shift_group_right(group<Dim> g, T x,
   __acpp_group_barrier(g);
 
   // checking for both larger and smaller in case 'group<Dim>::linear_id_type' is not unsigned
-  if (target_lid > g.get_local_range().size() || target_lid < 0)
+  if (target_lid >= g.get_local_range().size() || target_lid < 0)
     target_lid = 0;
+  // TODO SHIFT RIGHT 0 => I have implemented it with 31
 
   x = scratch[target_lid];
   __acpp_group_barrier(g);
@@ -702,7 +703,9 @@ HIPSYCL_KERNEL_TARGET T __acpp_shift_group_right(sub_group g, T x,
 #else
   if constexpr (std::is_integral_v<T>) {
     __acpp_group_barrier(g);
-    const auto pos = g.get_local_linear_id() - delta > g.get_local_range().size() ? 31 : g.get_local_linear_id() - delta;
+    // TODO DOES THIS WORK
+    // TODO 31 magic constant
+    const auto pos = g.get_local_linear_id() - delta >= g.get_local_range().size() ? 31 : g.get_local_linear_id() - delta;
     auto tmp = __cbs_shuffle(x, pos);
     __acpp_group_barrier(g);
     return tmp;

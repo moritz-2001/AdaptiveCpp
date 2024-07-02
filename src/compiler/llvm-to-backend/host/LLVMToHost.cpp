@@ -97,7 +97,7 @@ bool LLVMToHostTranslator::toBackendFlavor(llvm::Module &M, PassHandler &PH) {
   }
 
   std::string BuiltinBitcodeFileName = "libkernel-sscp-host-full.bc";
-  if(IsFastMath)
+  if (IsFastMath)
     BuiltinBitcodeFileName = "libkernel-sscp-host-fast-full.bc";
   std::string BuiltinBitcodeFile =
       common::filesystem::join_path(common::filesystem::get_install_directory(),
@@ -160,24 +160,30 @@ bool LLVMToHostTranslator::translateToBackendFormat(llvm::Module &FlavoredModule
   const std::string ClangPath = HIPSYCL_CLANG_PATH;
   const std::string CpuFlag = HIPSYCL_HOST_CPU_FLAG;
 
-  llvm::SmallVector<llvm::StringRef, 16> Invocation{ClangPath,
-                                                    "-O3",
-                                                    CpuFlag,
-                                                    "-x",
-                                                    "ir",
-                                                    "-shared",
-                                                    "-Wno-pass-failed",
-                                                    "-fPIC",
-                                                    "-o",
-                                                    OutputFilename,
-                                                    InputFile->TmpName};
+  llvm::SmallVector<llvm::StringRef, 16> Invocation{
+      ClangPath,
+      "-O3",
+      CpuFlag,
+      "-x",
+      "ir",
+      "-shared",
+      "-Wno-pass-failed",
+      "-fPIC",
+     // "-fplugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
+     // "-fpass-plugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
+      "-o",
+      OutputFilename,
+     // "-mllvm",
+     // "-rv",
+      InputFile->TmpName,
+  };
 
   std::string ArgString;
   for (const auto &S : Invocation) {
     ArgString += S;
     ArgString += " ";
   }
-  HIPSYCL_DEBUG_INFO << "LLVMToHost: Invoking " << ArgString << "\n";
+  llvm::outs() << "LLVMToHost: Invoking " << ArgString << "\n";
 
   int R = llvm::sys::ExecuteAndWait(ClangPath, Invocation);
 

@@ -5,8 +5,8 @@
 #include <iostream>
 
 int main() {
-  constexpr size_t local_size = 256;
-  constexpr size_t global_size = 1024;
+  constexpr size_t local_size = 257;
+  constexpr size_t global_size = 257;
 
   cl::sycl::queue queue;
   std::vector<int> host_buf;
@@ -32,7 +32,7 @@ int main() {
           });
     });
   }
-  for (size_t i = 0; i < global_size / local_size; ++i) {
+  for (size_t i = 0; i < (global_size + local_size-1) / local_size; ++i) {
     // CHECK: 32640
     // CHECK: 98176
     // CHECK: 163712

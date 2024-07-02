@@ -2,6 +2,9 @@
 #define RV_SHUFFLE_H
 
 #include "rv.h"
+#include <type_traits>
+#include <array>
+#include <cstring>
 
 
 namespace hipsycl {

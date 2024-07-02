@@ -40,8 +40,8 @@
 #include "sscp/builtins/subgroup.hpp"
 #endif
 
-#define HIERACHICAL
-//#define RV
+//#define HIERACHICAL
+#define RV
 
 #if defined(RV)
 #include "host/rv.h"
@@ -141,7 +141,7 @@ private:
 
 };
 
-#elif defined(RV)
+#elif defined(RV) and false
 class sub_group {
 public:
   using id_type = sycl::id<1>;
@@ -313,12 +313,10 @@ public:
     return get_local_linear_id() == 0;
   }
 
-#if !HIPSYCL_LIBKERNEL_IS_DEVICE_PASS
   HIPSYCL_KERNEL_TARGET
   void *get_local_memory_ptr() const {
-    return _local_memory_ptr;
+    return nullptr;
   }
-#endif
 
 private:
   int hiplike_num_subgroups() const {

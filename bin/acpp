@@ -1026,7 +1026,6 @@ class cuda_multipass_invocation:
 
     if not sys.platform.startswith("win32"):
       flags += ["-fpass-plugin=" + self._config.acpp_plugin_path]
-      flags += ["-fpass-plugin=" + self._rv_plugin_path]
     return flags
 
   # CXX flags for main pass
