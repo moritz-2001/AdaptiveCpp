@@ -5,8 +5,8 @@
 #include <iostream>
 
 int main() {
-  constexpr size_t local_size = 12;
-  constexpr size_t global_size = 12;
+  constexpr size_t local_size = 32;
+  constexpr size_t global_size = 32;
 
   std::vector<int> host_buf(global_size, 0);
   std::iota(host_buf.begin(), host_buf.end(), 0);

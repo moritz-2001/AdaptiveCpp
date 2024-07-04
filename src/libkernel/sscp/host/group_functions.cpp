@@ -11,12 +11,11 @@
 
 #define RV
 
+// TODO use the correct functions
 extern "C" [[clang::convergent]] void __acpp_cbs_sub_barrier();
 extern "C" [[clang::convergent]] void __acpp_cbs_barrier();
 
-// TODO TEST RV
-
-// TODO acpp switch maps to host in generic case when using sub_grouo{}.get_local_linear_id()
+// TODO acpp switch maps to host in generic case when using sub_group{}.get_local_linear_id()
 
 // TODO problems with intrinsics (host code is still generated?)
 // => linker error when compiling with generic
@@ -31,10 +30,14 @@ extern "C" [[clang::convergent]] void __acpp_cbs_barrier();
 
 // TODO for scan no impls in header?
 
-// TODO SYCL incomplete sub-groups?
-// -> TEST WITHOUT INTRINSICS; ATM intrinsics do not support incomplete sub-groups
+// TODO SYCL incomplete sub-groups? CBS INTRINSICS support
 
-// TODO why do I need this function impl; Shouln't this function be created by the optimizations
+// TODO shift_right 0 or group end ?
+
+// TODO Implement reduction for floats
+
+// TODO why do I need this function impl; Shouln't this function be created by the fit_int
+// optimization
 HIPSYCL_SSCP_BUILTIN bool __acpp_sscp_if_global_sizes_fit_in_int() { return false; }
 
 #define ALL(MACRO)                                                                                 \
@@ -295,35 +298,35 @@ bool __acpp_sscp_sub_group_none(bool pred) { return __acpp_sscp_sub_group_all(no
 
 // TODO floats
 #define REDUCE(LEVEL, T, TNAME)                                                                    \
-  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_## T __acpp_sscp_## LEVEL## _group_reduce_## TNAME(           \
-      __acpp_sscp_algorithm_op op, __acpp_## T x) {                                                 \
-    return LEVEL## _reduce(op, x);                                                                  \
+  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_reduce_##TNAME(           \
+      __acpp_sscp_algorithm_op op, __acpp_##T x) {                                                 \
+    return LEVEL##_reduce(op, x);                                                                  \
   };
 
 #define BROADCAST(LEVEL, T, TNAME)                                                                 \
-  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_## T __acpp_sscp_## LEVEL## _group_broadcast_## TNAME(        \
-      __acpp_int32 sender, __acpp_## T x) {                                                         \
-    return LEVEL## _broadcast(sender, x);                                                           \
+  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_broadcast_##TNAME(        \
+      __acpp_int32 sender, __acpp_##T x) {                                                         \
+    return LEVEL##_broadcast(sender, x);                                                           \
   };
 
 #define SHIFT_LEFT(LEVEL, T, TNAME)                                                                \
-  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_## T __acpp_sscp_## LEVEL## _group_shl_## TNAME(              \
-      __acpp_## T x, __acpp_uint32 delta) {                                                         \
-    return LEVEL## _shift_left(x, delta);                                                           \
+  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_shl_##TNAME(              \
+      __acpp_##T x, __acpp_uint32 delta) {                                                         \
+    return LEVEL##_shift_left(x, delta);                                                           \
   };
 
 #define SHIFT_RIGHT(LEVEL, T, TNAME)                                                               \
-  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_## T __acpp_sscp_## LEVEL## _group_shr_## TNAME(              \
-      __acpp_## T x, __acpp_uint32 delta) {                                                         \
-    return LEVEL## _shift_right(x, delta);                                                          \
+  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_shr_##TNAME(              \
+      __acpp_##T x, __acpp_uint32 delta) {                                                         \
+    return LEVEL##_shift_right(x, delta);                                                          \
   };
 
 // TODO PERMUTE
 
 #define SELECT(LEVEL, T, TNAME)                                                                    \
-  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_## T __acpp_sscp_## LEVEL## _group_select_## TNAME(           \
-      __acpp_## T x, __acpp_uint32 delta) {                                                         \
-    return LEVEL## _select(x, delta);                                                               \
+  HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_select_##TNAME(           \
+      __acpp_##T x, __acpp_uint32 delta) {                                                         \
+    return LEVEL##_select(x, delta);                                                               \
   };
 
 ALL(BROADCAST)

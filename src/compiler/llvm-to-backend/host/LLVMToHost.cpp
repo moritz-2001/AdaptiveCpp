@@ -169,12 +169,12 @@ bool LLVMToHostTranslator::translateToBackendFormat(llvm::Module &FlavoredModule
       "-shared",
       "-Wno-pass-failed",
       "-fPIC",
-     // "-fplugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
-     // "-fpass-plugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
+      "-fplugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
+      "-fpass-plugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
       "-o",
       OutputFilename,
-     // "-mllvm",
-     // "-rv",
+      "-mllvm",
+      "-rv",
       InputFile->TmpName,
   };
 

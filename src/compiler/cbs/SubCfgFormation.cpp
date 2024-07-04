@@ -64,6 +64,7 @@
 #include <numeric>
 
 #define DEBUG_SUBCFG_FORMATION
+#define RV
 
 namespace {
 using namespace hipsycl::compiler;
