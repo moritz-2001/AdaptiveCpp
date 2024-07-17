@@ -68,7 +68,7 @@ static constexpr const char LocalSizeGlobalNameX[] = "__acpp_cbs_local_size_x";
 static constexpr const char LocalSizeGlobalNameY[] = "__acpp_cbs_local_size_y";
 static constexpr const char LocalSizeGlobalNameZ[] = "__acpp_cbs_local_size_z";
 static const std::array<const char *, 3> LocalSizeGlobalNames{
-    LocalSizeGlobalNameX, LocalSizeGlobalNameY, LocalSizeGlobalNameZ};
+  LocalSizeGlobalNameX, LocalSizeGlobalNameY, LocalSizeGlobalNameZ};
 
 static constexpr const char GroupIdGlobalNameX[] = "__acpp_cbs_group_id_x";
 static constexpr const char GroupIdGlobalNameY[] = "__acpp_cbs_group_id_y";
@@ -80,7 +80,7 @@ static constexpr const char NumGroupsGlobalNameX[] = "__acpp_cbs_num_groups_x";
 static constexpr const char NumGroupsGlobalNameY[] = "__acpp_cbs_num_groups_y";
 static constexpr const char NumGroupsGlobalNameZ[] = "__acpp_cbs_num_groups_z";
 static const std::array<const char *, 3> NumGroupsGlobalNames{
-    NumGroupsGlobalNameX, NumGroupsGlobalNameY, NumGroupsGlobalNameZ};
+  NumGroupsGlobalNameX, NumGroupsGlobalNameY, NumGroupsGlobalNameZ};
 
 static constexpr const char SscpDynamicLocalMemoryPtrName[] = "__acpp_cbs_sscp_dynamic_local_memory";
 } // namespace cbs
@@ -193,6 +193,11 @@ llvm::LoadInst *loadFromAlloca(llvm::AllocaInst *Alloca, llvm::Value *Idx,
                                llvm::Instruction *InsertBefore, const llvm::Twine &NamePrefix = "");
 
 llvm::AllocaInst *getLoopStateAllocaForLoad(llvm::LoadInst &LInst, llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8>* ArgsToAlloca = nullptr);
+
+// searches for llvm.var.annotation and returns the value that is annotated by it, as well the
+// annotation instruction
+std::pair<llvm::Value *, llvm::Instruction *>
+getLocalSizeArgumentFromAnnotation(llvm::Function &F);
 
 template <class UserType, class Func> bool anyOfUsers(llvm::Value *V, Func &&L) {
   for (auto *U : V->users())

@@ -1,4 +1,5 @@
 // RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 #include <CL/sycl.hpp>
@@ -74,6 +75,9 @@ int main() {
 
     bool x = true;
     for (size_t i = 0; i < 32*32; ++i) {
+        if ( matrixCheck[i] != matrixC[i]) {
+          std::cout << matrixC[i] << "\n";
+        }
         x &= matrixCheck[i] == matrixC[i];
     }
 

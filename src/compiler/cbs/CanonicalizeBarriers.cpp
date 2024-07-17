@@ -98,16 +98,15 @@ bool pruneEmptyRegions(llvm::Function &F, const SplitterAnnotationInfo &SAA) {
 }
 
 bool canonicalizeEntry(llvm::BasicBlock *Entry, SplitterAnnotationInfo &SAA) {
-  bool Changed = false;
   if (!utils::hasOnlyBarrier(Entry, SAA) && !utils::hasOnlySubBarrier(Entry, SAA)) {
     llvm::BasicBlock *EffectiveEntry = SplitBlock(Entry, &(Entry->front()));
 
     EffectiveEntry->takeName(Entry);
     Entry->setName("entry.barrier");
     utils::createBarrier(Entry->getTerminator(), SAA);
-    Changed = true;
+    return true;
   }
-  return Changed;
+  return false;
 }
 
 // Canonicalize barriers: ensure all barriers are in a separate BB
@@ -150,7 +149,7 @@ bool canonicalizeBarriers(llvm::Function &F, SplitterAnnotationInfo &SAA) {
     }
 
     llvm::BasicBlock *Predecessor = BB->getSinglePredecessor();
-    if (Predecessor != NULL) {
+    if (Predecessor != nullptr) {
       auto *Pt = Predecessor->getTerminator();
       if ((Pt->getNumSuccessors() == 1) && (&BB->front() == Barrier)) {
         // Barrier is at the beginning of the BB,
@@ -197,7 +196,7 @@ llvm::PreservedAnalyses CanonicalizeBarriersPass::run(llvm::Function &F,
                                                       llvm::FunctionAnalysisManager &AM) {
   auto &MAM = AM.getResult<llvm::ModuleAnalysisManagerFunctionProxy>(F);
   auto *SAA = MAM.getCachedResult<hipsycl::compiler::SplitterAnnotationAnalysis>(*F.getParent());
-  if (!SAA || !SAA->isKernelFunc(&F) || !(utils::hasBarriers(F, *SAA) || utils::hasSubBarriers(F, *SAA)))
+  if (!SAA || !SAA->isKernelFunc(&F))
     return llvm::PreservedAnalyses::all();
 
   if (!canonicalizeBarriers(F, *SAA))

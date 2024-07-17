@@ -40,6 +40,7 @@
 #include "hipSYCL/compiler/llvm-to-backend/host/HostKernelWrapperPass.hpp"
 #include "hipSYCL/compiler/sscp/IRConstantReplacer.hpp"
 #include "hipSYCL/glue/llvm-sscp/s2_ir_constants.hpp"
+#include "hipSYCL/RV.h"
 
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
@@ -169,12 +170,16 @@ bool LLVMToHostTranslator::translateToBackendFormat(llvm::Module &FlavoredModule
       "-shared",
       "-Wno-pass-failed",
       "-fPIC",
+#if USE_RV
       "-fplugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
       "-fpass-plugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
+#endif
       "-o",
       OutputFilename,
+#if USE_RV
       "-mllvm",
       "-rv",
+#endif
       InputFile->TmpName,
   };
 

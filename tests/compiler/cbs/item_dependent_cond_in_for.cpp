@@ -1,5 +1,6 @@
 // XFAIL: pocl || org
 // RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 #include <array>

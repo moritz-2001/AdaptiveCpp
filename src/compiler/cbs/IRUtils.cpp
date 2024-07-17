@@ -45,13 +45,12 @@
 namespace hipsycl::compiler::utils {
 using namespace hipsycl::compiler::cbs;
 
-bool isExtractIntrinsic(const llvm::Function* F) {
+bool isExtractIntrinsic(const llvm::Function *F) {
   if (not F) {
     return false;
   }
   return F->getName().contains("extract");
 }
-
 
 llvm::Loop *updateDtAndLi(llvm::LoopInfo &LI, llvm::DominatorTree &DT, const llvm::BasicBlock *B,
                           llvm::Function &F) {
@@ -157,10 +156,10 @@ llvm::CallInst *createBarrier(llvm::Instruction *InsertBefore, SplitterAnnotatio
 }
 
 bool isCBSIntrinsic(llvm::Function *F) {
-  std::array arr{"__cbs_reduce", "__cbs_shift_left", "__cbs_broadcast", "__cbs_shuffle", "__cbs_shift_right"};
-  return std::any_of(arr.begin(), arr.end(), [&](std::string_view str) {
-    return F->getName().contains(str);
-  });
+  std::array arr{"__cbs_reduce", "__cbs_shift_left", "__cbs_broadcast", "__cbs_shuffle",
+                 "__cbs_shift_right"};
+  return std::any_of(arr.begin(), arr.end(),
+                     [&](std::string_view str) { return F->getName().contains(str); });
 }
 
 bool isSubBarrier(const llvm::Instruction *I, const SplitterAnnotationInfo &SAA) {
@@ -169,21 +168,26 @@ bool isSubBarrier(const llvm::Instruction *I, const SplitterAnnotationInfo &SAA)
   return false;
 }
 
-bool blockHasSubBarrier(const llvm::BasicBlock *BB, const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
-  return std::any_of(BB->begin(), BB->end(), [&SAA](const auto &I) { return isSubBarrier(&I, SAA); });
+bool blockHasSubBarrier(const llvm::BasicBlock *BB,
+                        const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
+  return std::any_of(BB->begin(), BB->end(),
+                     [&SAA](const auto &I) { return isSubBarrier(&I, SAA); });
 }
 
-bool startsWithSubBarrier(const llvm::BasicBlock *BB, const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
+bool startsWithSubBarrier(const llvm::BasicBlock *BB,
+                          const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
   return isSubBarrier(BB->getFirstNonPHI(), SAA);
 }
 
-bool endsWithSubBarrier(const llvm::BasicBlock *BB, const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
+bool endsWithSubBarrier(const llvm::BasicBlock *BB,
+                        const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
   const llvm::Instruction *T = BB->getTerminator();
   assert(T);
   return BB->size() > 1 && T->getPrevNode() && isSubBarrier(T->getPrevNode(), SAA);
 }
 
-bool hasOnlySubBarrier(const llvm::BasicBlock *BB, const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
+bool hasOnlySubBarrier(const llvm::BasicBlock *BB,
+                       const hipsycl::compiler::SplitterAnnotationInfo &SAA) {
   return endsWithSubBarrier(BB, SAA) && BB->size() == 2;
 }
 
@@ -206,15 +210,17 @@ bool hasSubBarriers(const llvm::Function &F, const hipsycl::compiler::SplitterAn
   return false;
 }
 
-llvm::CallInst * createSubBarrier(llvm::Instruction *InsertBefore,
-    hipsycl::compiler::SplitterAnnotationInfo &SAA) {
+llvm::CallInst *createSubBarrier(llvm::Instruction *InsertBefore,
+                                 hipsycl::compiler::SplitterAnnotationInfo &SAA) {
   llvm::Module *M = InsertBefore->getParent()->getParent()->getParent();
 
-  if (InsertBefore != &InsertBefore->getParent()->front() && isSubBarrier(InsertBefore->getPrevNode(), SAA))
+  if (InsertBefore != &InsertBefore->getParent()->front() &&
+      isSubBarrier(InsertBefore->getPrevNode(), SAA))
     return llvm::cast<llvm::CallInst>(InsertBefore->getPrevNode());
 
   llvm::Function *F = llvm::cast<llvm::Function>(
-      M->getOrInsertFunction(SubBarrierIntrinsicName, llvm::Type::getVoidTy(M->getContext())).getCallee());
+      M->getOrInsertFunction(SubBarrierIntrinsicName, llvm::Type::getVoidTy(M->getContext()))
+          .getCallee());
   F->addFnAttr(llvm::Attribute::NoDuplicate);
   F->setLinkage(llvm::GlobalValue::LinkOnceAnyLinkage);
   SAA.addSubSplitter(F);
@@ -223,8 +229,9 @@ llvm::CallInst * createSubBarrier(llvm::Instruction *InsertBefore,
 }
 
 bool checkedInlineFunction(llvm::CallBase *CI, llvm::StringRef PassPrefix, int NoInlineDebugLevel) {
-  if (CI->getCalledFunction()->isIntrinsic() || CI->getCalledFunction()->getName() == BarrierIntrinsicName ||
-    CI->getCalledFunction()->getName() == SubBarrierIntrinsicName)
+  if (CI->getCalledFunction()->isIntrinsic() ||
+      CI->getCalledFunction()->getName() == BarrierIntrinsicName ||
+      CI->getCalledFunction()->getName() == SubBarrierIntrinsicName)
     return false;
 
   // needed to be valid for success log
@@ -488,7 +495,8 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::Loop &L, llvm::Value *I
       }
     }
 
-    HIPSYCL_DEBUG_ERROR << "ARRAIFY: " << I->getName() + "_alloca" << "\n";
+    HIPSYCL_DEBUG_ERROR << "ARRAIFY: " << I->getName() + "_alloca"
+                        << "\n";
     auto *Alloca = AllocaBuilder.CreateAlloca(
         T, AllocaBuilder.getInt32(hipsycl::compiler::NumArrayElements), I->getName() + "_alloca");
     Alloca->setAlignment(llvm::Align{hipsycl::compiler::DefaultAlignment});
@@ -578,17 +586,19 @@ llvm::LoadInst *loadFromAlloca(llvm::AllocaInst *Alloca, llvm::Value *Idx,
 }
 
 // get the work-item state alloca a load reads from (through GEPs..)
-llvm::AllocaInst *  getLoopStateAllocaForLoad(llvm::LoadInst &LInst, llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8>* ArgsToAlloca) {
+llvm::AllocaInst *getLoopStateAllocaForLoad(
+    llvm::LoadInst &LInst,
+    llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8> *ArgsToAlloca) {
   llvm::AllocaInst *Alloca = nullptr;
   if (auto *GEPI = llvm::dyn_cast<llvm::GetElementPtrInst>(LInst.getPointerOperand())) {
-    auto* Arg = llvm::dyn_cast<llvm::Argument>(GEPI->getPointerOperand());
+    auto *Arg = llvm::dyn_cast<llvm::Argument>(GEPI->getPointerOperand());
     if (Arg && ArgsToAlloca) {
-        Alloca = (*ArgsToAlloca)[Arg];
+      Alloca = (*ArgsToAlloca)[Arg];
     } else {
       Alloca = llvm::dyn_cast<llvm::AllocaInst>(GEPI->getPointerOperand());
     }
-  } else if (auto* Arg = llvm::dyn_cast<llvm::Argument>(LInst.getPointerOperand())) {
-    if (auto* Arg = llvm::dyn_cast<llvm::Argument>(LInst.getPointerOperand())) {
+  } else if (auto *Arg = llvm::dyn_cast<llvm::Argument>(LInst.getPointerOperand())) {
+    if (auto *Arg = llvm::dyn_cast<llvm::Argument>(LInst.getPointerOperand())) {
       if (ArgsToAlloca) {
         Alloca = (*ArgsToAlloca)[Arg];
       }
@@ -599,6 +609,39 @@ llvm::AllocaInst *  getLoopStateAllocaForLoad(llvm::LoadInst &LInst, llvm::Small
   if (Alloca && Alloca->hasMetadata(hipsycl::compiler::MDKind::Arrayified))
     return Alloca;
   return nullptr;
+}
+
+std::pair<llvm::Value *, llvm::Instruction *>
+getLocalSizeArgumentFromAnnotation(llvm::Function &F) {
+  for (auto &BB : F)
+    for (auto &I : BB)
+      if (auto *UI = llvm::dyn_cast<llvm::CallInst>(&I))
+        if (UI->getCalledFunction()->getName().startswith("llvm.var.annotation")) {
+          HIPSYCL_DEBUG_INFO << *UI << '\n';
+          llvm::GlobalVariable *AnnotateStr = nullptr;
+          if (auto *CE = llvm::dyn_cast<llvm::ConstantExpr>(UI->getOperand(1));
+              CE && CE->getOpcode() == llvm::Instruction::GetElementPtr) {
+            if (auto *AnnoteStr = llvm::dyn_cast<llvm::GlobalVariable>(CE->getOperand(0)))
+              AnnotateStr = AnnoteStr;
+          } else if (auto *AnnoteStr =
+                         llvm::dyn_cast<llvm::GlobalVariable>(UI->getOperand(1))) // opaque-ptr
+            AnnotateStr = AnnoteStr;
+
+          if (AnnotateStr) {
+            if (const auto *Data =
+                    llvm::dyn_cast<llvm::ConstantDataSequential>(AnnotateStr->getInitializer())) {
+              if (Data->isString() &&
+                  Data->getAsString().startswith("hipsycl_nd_kernel_local_size_arg")) {
+                if (const auto *BC = llvm::dyn_cast<llvm::BitCastInst>(UI->getOperand(0)))
+                  return {BC->getOperand(0), UI};
+                return {UI->getOperand(0), UI};
+              }
+            }
+          }
+        }
+
+  assert(false && "Didn't find annotated argument!");
+  return {nullptr, nullptr};
 }
 
 // bring along the llvm.dbg.value intrinsics when cloning values
@@ -613,9 +656,7 @@ void copyDgbValues(llvm::Value *From, llvm::Value *To, llvm::Instruction *Insert
   }
 }
 
-void dropDebugLocation(llvm::Instruction &I) {
-  I.dropLocation();
-}
+void dropDebugLocation(llvm::Instruction &I) { I.dropLocation(); }
 
 void dropDebugLocation(llvm::BasicBlock *BB) {
   for (auto &I : *BB) {

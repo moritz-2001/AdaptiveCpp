@@ -1,4 +1,5 @@
 // RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 #include <CL/sycl.hpp>
@@ -30,6 +31,9 @@ int main() {
           });
     });
   }
+
+  // CHECK: 2
   std::cout << host_buf[0] << "\n";
+  // CHECK: 2
   std::cout << host_buf[1] << "\n";
 }

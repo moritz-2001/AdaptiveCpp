@@ -1,4 +1,6 @@
 // RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 #include <CL/sycl.hpp>
@@ -26,7 +28,8 @@ int main() {
             const auto sg = item.get_sub_group();
 
             auto val = acc[item.get_global_id()];
-            acc[item.get_global_id()] = cl::sycl::count_if(sg, val,  [](auto x) { return x % 2 == 0; });
+            uint8_t v = val % 2 == 0 ? 1u : 0u;
+            acc[item.get_global_id()] = cl::sycl::reduce_over_group(sg, v,  cl::sycl::plus<uint8_t>{});
           });
     });
   }

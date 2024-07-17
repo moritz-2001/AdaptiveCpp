@@ -1,4 +1,5 @@
 // RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 #include <CL/sycl.hpp>
@@ -26,7 +27,9 @@ int main() {
             const auto sg = item.get_sub_group();
 
             auto val = acc[item.get_global_id()];
-            acc[item.get_global_id()] = cl::sycl::find_if(sg, val, [](int a) { return a == 2; });
+            int r = val == 2 ? sg.get_local_linear_id() : -1;
+            printf("r=%d\n", r);
+            acc[item.get_global_id()] = cl::sycl::reduce_over_group(sg, r, cl::sycl::maximum<decltype(r)>{});
           });
     });
   }

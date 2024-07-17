@@ -1,12 +1,13 @@
 // RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 #include <CL/sycl.hpp>
 #include <iostream>
 
 int main() {
-  constexpr size_t local_size = 256;
-  constexpr size_t global_size = 256;
+  constexpr size_t local_size = 32;
+  constexpr size_t global_size = 32;
 
   std::vector<int> host_buf(global_size, 2);
   cl::sycl::queue queue;

@@ -459,7 +459,7 @@ bool kernel_cache::persistent_cache_lookup(code_object_id id_of_binary,
                                            std::string &out) const {
   std::string filename = get_persistent_cache_file(id_of_binary);
   std::ifstream file{filename, std::ios::in | std::ios::binary | std::ios::ate};
-  
+  return false;
   if(!file.is_open())
     return false;
 

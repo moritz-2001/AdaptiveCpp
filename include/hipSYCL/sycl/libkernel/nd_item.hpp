@@ -214,15 +214,15 @@ struct nd_item
   HIPSYCL_KERNEL_TARGET
   sub_group get_sub_group() const
   {
-#if defined(HIERACHICAL) and not defined(RV)
+#if HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SSCP or USE_RV
+    return sub_group{};
+#else
     return sub_group{
         static_cast<uint32_t>(get_local_linear_id()) / SGSize,
         (get_local_range().size() + (SGSize-1)) / SGSize,
         _sub_local_memory_ptr,
       _subgroup_id
     };
-#else
-   return sub_group{};
 #endif
   }
 

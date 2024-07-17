@@ -21,7 +21,7 @@ template <typename T> HIPSYCL_FORCE_INLINE int dot_product(sub_group sg, T a, T 
 }
 
 template <typename T, typename Pred> HIPSYCL_FORCE_INLINE int find_if(sub_group sg, T a, Pred pred) {
-#ifdef RV
+#if USE_RV
   return detail::rv_find_if(a, pred);
 #else
   T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
@@ -44,7 +44,7 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t count_if(sub_
   uint32_t x = pred(a) ? 1 : 0;
   return detail::host_builtins::__acpp_reduce_over_group(sg, x, sycl::plus<uint32_t>{});
 /*
-#ifdef RV
+#if USE_RV
   return detail::rv_count_if(a, pred);
 #else
   T *scratch = static_cast<T *>(sg.get_local_memory_ptr());
@@ -64,7 +64,7 @@ template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t count_if(sub_
 }
 
 template <typename T, typename Pred> HIPSYCL_FORCE_INLINE uint32_t partition(sub_group sg, T& a, Pred pred) {
-#ifdef RV
+#if USE_RV
     return detail::rv_partition(a, pred);
 #else
   T *scratch = static_cast<T *>(sg.get_local_memory_ptr());

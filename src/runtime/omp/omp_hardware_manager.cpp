@@ -30,8 +30,10 @@
 #include <limits>
 
 #include "hipSYCL/runtime/omp/omp_hardware_manager.hpp"
-#include "hipSYCL/runtime/error.hpp"
+
+#include "hipSYCL/compiler/cbs/IRUtils.hpp"
 #include "hipSYCL/runtime/device_id.hpp"
+#include "hipSYCL/runtime/error.hpp"
 
 namespace hipsycl {
 namespace rt {
@@ -289,7 +291,7 @@ std::vector<std::size_t> omp_hardware_context::get_property(device_uint_list_pro
 {
   switch(prop) {
   case device_uint_list_property::sub_group_sizes:
-    return std::vector<std::size_t>{1};
+    return std::vector<std::size_t>{compiler::SGSize};
     break;
   }
   assert(false && "Invalid device property");

@@ -14,9 +14,10 @@ namespace detail {
 
 template <typename T, typename RvOperation>
 T apply_on_data(T x, const RvOperation& op) {
-  if constexpr (!std::is_fundamental<T>::value) {
+  if constexpr (std::is_fundamental<T>::value) {
     return op(x);
   } else {
+    static_assert(std::is_fundamental<T>::value);
     constexpr std::size_t number_of_floats = (sizeof(T) + sizeof(float) - 1) / sizeof(float);
     std::array<float, number_of_floats> words;
     std::memcpy(&words, &x, sizeof(T));
@@ -29,23 +30,7 @@ T apply_on_data(T x, const RvOperation& op) {
   }
 }
 
-// implemented based on warp_shuffle_op in rocPRIM
-
-// difference between shuffle_impl and extract_impl: id for extract must be
-// uniform value.
-template <typename T> T shuffle_impl(T x, int id) {
-  return apply_on_data(x, [id](const float data) {
-    float ret = data;
-#pragma unroll
-    for (int i = 0; i < rv_num_lanes(); ++i) {
-      const auto srcLane = rv_extract(id, i);
-      const float v = rv_extract(data, srcLane);
-      ret = rv_insert(ret, i, v);
-    }
-    return ret;
-  });
-}
-
+/*
 template <typename T> T swap(T vector, uint32_t i, uint32_t j) {
   const auto ithLaneV = rv_extract(vector, i);
   const auto jthLaneV = rv_extract(vector, j);
@@ -91,9 +76,25 @@ template <typename T, typename Pred> int rv_find_if(T x, Pred pred) {
   }
   return j;
 }
+*/
 
 template <typename T> T extract_impl(T x, int id) {
   return apply_on_data(x, [id](const auto data) { return rv_extract(data, id); });
+}
+
+// difference between shuffle_impl and extract_impl: id for extract must be
+// uniform value.
+template <typename T> T shuffle_impl(T x, int id) {
+  return apply_on_data(x, [id](const float data) {
+    float ret = data;
+#pragma unroll
+    for (int i = 0; i < rv_num_lanes(); ++i) {
+      const auto srcLane = rv_extract(id, i);
+      const float v = rv_extract(data, srcLane);
+      ret = rv_insert(ret, i, v);
+    }
+    return ret;
+  });
 }
 
 template <typename T>
@@ -131,6 +132,7 @@ template <typename T> T shuffle_xor_impl(T x, int lane_mask) {
   }
   return ret;
 }
+
 
 } // namespace detail
 } // namespace sycl

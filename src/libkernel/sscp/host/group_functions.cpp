@@ -1,32 +1,36 @@
-#include "hipSYCL/sycl/libkernel/host/rv_shuffle.h"
+#include "../../../../include/hipSYCL/compiler/cbs/IRUtils.hpp"
 #include "hipSYCL/sycl/libkernel/sscp/builtins/broadcast.hpp"
 #include "hipSYCL/sycl/libkernel/sscp/builtins/core.hpp"
 #include "hipSYCL/sycl/libkernel/sscp/builtins/host/host.h"
 #include "hipSYCL/sycl/libkernel/sscp/builtins/subgroup.hpp"
 #include "hipSYCL/sycl/libkernel/sub_group.hpp"
 
+#include "hipSYCL/RV.h"
+#include "hipSYCL/sycl/libkernel/host/cbs_intrinsics.h"
 #include <cassert>
 #include <cstdint>
 #include <type_traits>
 
-#define RV
+#include "hipSYCL/sycl/libkernel/host/rv_shuffle.h"
 
 // TODO use the correct functions
 extern "C" [[clang::convergent]] void __acpp_cbs_sub_barrier();
 extern "C" [[clang::convergent]] void __acpp_cbs_barrier();
 
-// TODO acpp switch maps to host in generic case when using sub_group{}.get_local_linear_id()
+extern "C" size_t __acpp_cbs_local_id_x;
+extern "C" size_t __acpp_cbs_local_id_y;
+extern "C" size_t __acpp_cbs_local_id_z;
 
-// TODO problems with intrinsics (host code is still generated?)
-// => linker error when compiling with generic
+extern "C" size_t __acpp_cbs_local_size_x;
+extern "C" size_t __acpp_cbs_local_size_y;
+extern "C" size_t __acpp_cbs_local_size_z;
 
-// TODO shift left => T trivally copyable ? , ....
-
-// TODO core function: purpose of DIM?
+// extern "C" size_t __hipsycl_cbs_local_id_subgroup;
 
 // TODO CBS AND RV REDUCE MISSING OPS
 
 // TODO ANY and ALL IMPS do not work (Also, fix them in host/group_functions)
+// TODO WHY Do they not work?
 
 // TODO for scan no impls in header?
 
@@ -36,22 +40,45 @@ extern "C" [[clang::convergent]] void __acpp_cbs_barrier();
 
 // TODO Implement reduction for floats
 
-// TODO why do I need this function impl; Shouln't this function be created by the fit_int
 // optimization
-HIPSYCL_SSCP_BUILTIN bool __acpp_sscp_if_global_sizes_fit_in_int() { return false; }
+// HIPSYCL_SSCP_BUILTIN bool __acpp_sscp_if_global_sizes_fit_in_int() { return false; }
 
-#define ALL(MACRO)                                                                                 \
+size_t get_local_linear_id() {
+  size_t lid_x = __acpp_cbs_local_id_x;
+  size_t lid_y = __acpp_cbs_local_id_z;
+  size_t lid_z = __acpp_cbs_local_id_y;
+
+  size_t lsize_x = __acpp_cbs_local_size_x;
+  size_t lsize_y = __acpp_cbs_local_size_y;
+
+  return lsize_x * lsize_y * lid_z + lsize_x * lid_y + lid_x;
+}
+
+size_t get_local_size() {
+  size_t size_x = __acpp_cbs_local_size_x;
+  size_t size_y = __acpp_cbs_local_size_y;
+  size_t size_z = __acpp_cbs_local_size_z;
+
+  return size_x * size_y * size_z;
+}
+
+#define ALL_VARIANTS(MACRO)                                                                        \
   MACRO(sub, int8, i8)                                                                             \
   MACRO(sub, int16, i16)                                                                           \
   MACRO(sub, int32, i32)                                                                           \
   MACRO(sub, int64, i64)                                                                           \
-  MACRO(work, int8, i8) MACRO(work, int16, i16) MACRO(work, int32, i32) MACRO(work, int64, i64)
+  MACRO(sub, uint8, u8)                                                                            \
+  MACRO(sub, uint16, u16)                                                                          \
+  MACRO(sub, uint32, u32)                                                                          \
+  MACRO(sub, uint64, u64)                                                                          \
+  MACRO(work, int8, i8)                                                                            \
+  MACRO(work, int16, i16) MACRO(work, int32, i32) MACRO(work, int64, i64) MACRO(work, uint8, u8)   \
+      MACRO(work, uint16, u16) MACRO(work, uint32, u32) MACRO(work, uint64, u64)
 
 template <typename T> T work_broadcast(const int sender, T x) {
   T *scratch = static_cast<T *>(work_group_shared_memory);
 
-  if (const size_t local_linear_id = __acpp_sscp_get_local_linear_id<3>();
-      sender == local_linear_id) {
+  if (const size_t local_linear_id = get_local_linear_id(); sender == local_linear_id) {
     scratch[0] = x;
   }
 
@@ -63,8 +90,9 @@ template <typename T> T work_broadcast(const int sender, T x) {
 }
 
 template <typename T> T sub_broadcast(const int sender, T x) {
+  T e = static_cast<uint64_t>(sender);
   __acpp_cbs_sub_barrier();
-  auto t = __cbs_extract(x, static_cast<uint64_t>(sender));
+  auto t = __cbs_extract(x, e);
   __acpp_cbs_sub_barrier();
   return t;
 }
@@ -119,11 +147,11 @@ template <typename T> T sub_reduce(__acpp_sscp_algorithm_op op, T x) {
   if (operation == ReduceOp::NOT_SUPPORTED) {
     assert(false);
   }
-#ifdef RV
+#if USE_RV
   return rv_reduce(x, static_cast<int>(operation));
 #else
   __acpp_cbs_sub_barrier();
-  const auto t = __cbs_reduce(x, static_cast<int>(operation));
+  const T t = __cbs_reduce(x, static_cast<int>(operation));
   __acpp_cbs_sub_barrier();
   return t;
 #endif
@@ -132,8 +160,8 @@ template <typename T> T sub_reduce(__acpp_sscp_algorithm_op op, T x) {
 template <typename T> T work_reduce(__acpp_sscp_algorithm_op op, T x) {
   T *scratch = static_cast<T *>(work_group_shared_memory);
 
-  const auto lid = __acpp_sscp_get_local_linear_id<3>();
-  const auto local_range = __acpp_sscp_get_local_size<3>();
+  const auto lid = get_local_linear_id();
+  const auto local_range = get_local_size();
 
   T result = sub_reduce(op, x);
 
@@ -163,24 +191,32 @@ template <typename T> T work_reduce(__acpp_sscp_algorithm_op op, T x) {
 }
 
 template <typename T> T sub_shift_left(T x, __acpp_uint32 delta) {
-#ifdef RV
+#if USE_RV
   return hipsycl::sycl::detail::shuffle_down_impl<T>(x, static_cast<int>(delta));
 #else
+
+  T *scratch = static_cast<T *>(sub_group_shared_memory);
+  auto lid = __acpp_sscp_get_subgroup_local_id();
+  auto target_lid = lid + delta;
+  scratch[lid] = x;
   __acpp_cbs_sub_barrier();
-  const auto pos = __acpp_sscp_get_subgroup_local_id() + delta >= 32
-                       ? 0
-                       : __acpp_sscp_get_subgroup_local_id() + delta;
-  auto tmp = __cbs_shuffle(x, pos);
+
+  // checking for both larger and smaller in case 'group<Dim>::linear_id_type' is not unsigned
+  if (target_lid >= hipsycl::compiler::SGSize)
+    target_lid = 0;
+
+  x = scratch[target_lid];
   __acpp_cbs_sub_barrier();
-  return tmp;
+  return x;
+
 #endif
 }
 
 template <typename T> T work_shift_left(T x, __acpp_uint32 delta) {
   T *scratch = static_cast<T *>(work_group_shared_memory);
 
-  const auto lid = __acpp_sscp_get_local_linear_id<3>();
-  const auto local_range = __acpp_sscp_get_local_size<3>();
+  const auto lid = get_local_linear_id();
+  const auto local_range = get_local_size();
   auto target_lid = lid + delta;
 
   scratch[lid] = x;
@@ -197,9 +233,26 @@ template <typename T> T work_shift_left(T x, __acpp_uint32 delta) {
 }
 
 template <typename T> T sub_shift_right(T x, __acpp_uint32 delta) {
-#ifdef RV
+#if USE_RV
   return hipsycl::sycl::detail::shuffle_up_impl(x, delta);
 #else
+  T *scratch = static_cast<T *>(sub_group_shared_memory);
+
+  const auto lid = __acpp_sscp_get_subgroup_local_id();
+  const auto local_range = lid + delta;
+  auto target_lid = lid - delta;
+
+  scratch[lid] = x;
+  __acpp_cbs_sub_barrier();
+
+  // checking for both larger and smaller in case 'group<Dim>::linear_id_type' is not unsigned
+  if (target_lid >= hipsycl::compiler::SGSize || target_lid < 0)
+    target_lid = 0;
+
+  x = scratch[target_lid];
+  __acpp_cbs_sub_barrier();
+  return x;
+  /*
   __acpp_cbs_sub_barrier();
   const auto pos =
       __acpp_sscp_get_subgroup_local_id() - delta >= __acpp_sscp_get_subgroup_max_size()
@@ -208,14 +261,15 @@ template <typename T> T sub_shift_right(T x, __acpp_uint32 delta) {
   auto tmp = __cbs_shuffle(x, pos);
   __acpp_cbs_sub_barrier();
   return tmp;
+  */
 #endif
 }
 
 template <typename T> T work_shift_right(T x, __acpp_uint32 delta) {
   T *scratch = static_cast<T *>(work_group_shared_memory);
 
-  const auto lid = __acpp_sscp_get_local_linear_id<3>();
-  const auto local_range = __acpp_sscp_get_local_size<3>();
+  const auto lid = get_local_linear_id();
+  const auto local_range = get_local_size();
   auto target_lid = lid - delta;
 
   scratch[lid] = x;
@@ -232,20 +286,23 @@ template <typename T> T work_shift_right(T x, __acpp_uint32 delta) {
 }
 
 template <typename T> T sub_select(T x, __acpp_uint32 delta) {
-#ifdef RV
+#if USE_RV
   return hipsycl::sycl::detail::shuffle_impl(x, delta);
 #else
+  T *scratch = static_cast<T *>(sub_group_shared_memory);
+  auto lid = __acpp_sscp_get_subgroup_local_id();
+  scratch[lid] = x;
   __acpp_cbs_sub_barrier();
-  auto tmp = __cbs_shuffle(x, delta);
+  x = scratch[delta];
   __acpp_cbs_sub_barrier();
-  return tmp;
+  return x;
 #endif
 }
 
 template <typename T> T work_select(T x, __acpp_uint32 delta) {
   T *scratch = static_cast<T *>(work_group_shared_memory);
 
-  const auto lid = __acpp_sscp_get_local_linear_id<3>();
+  const auto lid = get_local_linear_id();
 
   scratch[lid] = x;
   __acpp_cbs_barrier();
@@ -263,11 +320,12 @@ bool __acpp_sscp_work_group_any(bool pred) {
 
 HIPSYCL_SSCP_CONVERGENT_BUILTIN
 bool __acpp_sscp_sub_group_any(bool pred) {
-#ifdef RV
+#if USE_RV
   return rv_any(pred);
 #else
+  auto v = static_cast<uint8_t>(pred);
   __acpp_cbs_sub_barrier();
-  const auto t = __cbs_reduce(static_cast<uint8_t>(pred), static_cast<int>(ReduceOp::MAX)) > 0;
+  const auto t = __cbs_reduce(v, static_cast<int>(ReduceOp::MAX)) > 0;
   __acpp_cbs_sub_barrier();
   return t;
 #endif
@@ -280,11 +338,12 @@ bool __acpp_sscp_work_group_all(bool pred) {
 
 HIPSYCL_SSCP_CONVERGENT_BUILTIN
 bool __acpp_sscp_sub_group_all(bool pred) {
-#ifdef RV
+#if USE_RV
   return rv_all(pred);
 #else
+  auto v = static_cast<uint8_t>(pred);
   __acpp_cbs_sub_barrier();
-  const auto t = __cbs_reduce(static_cast<uint8_t>(pred), static_cast<int>(ReduceOp::MIN)) > 0;
+  const auto t = __cbs_reduce(v, static_cast<int>(ReduceOp::MIN)) > 0;
   __acpp_cbs_sub_barrier();
   return t;
 #endif
@@ -305,7 +364,7 @@ bool __acpp_sscp_sub_group_none(bool pred) { return __acpp_sscp_sub_group_all(no
 
 #define BROADCAST(LEVEL, T, TNAME)                                                                 \
   HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_broadcast_##TNAME(        \
-      __acpp_int32 sender, __acpp_##T x) {                                                         \
+      __acpp_int32 sender, __acpp_##T x) {                                                        \
     return LEVEL##_broadcast(sender, x);                                                           \
   };
 
@@ -329,9 +388,10 @@ bool __acpp_sscp_sub_group_none(bool pred) { return __acpp_sscp_sub_group_all(no
     return LEVEL##_select(x, delta);                                                               \
   };
 
-ALL(BROADCAST)
-ALL(REDUCE)
-ALL(SHIFT_LEFT)
-ALL(SELECT)
+ALL_VARIANTS(BROADCAST)
+ALL_VARIANTS(REDUCE)
+ALL_VARIANTS(SHIFT_LEFT)
+ALL_VARIANTS(SHIFT_RIGHT)
+ALL_VARIANTS(SELECT)
 
 // TODO SCAN

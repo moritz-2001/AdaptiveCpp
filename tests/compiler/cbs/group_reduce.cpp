@@ -1,12 +1,13 @@
 // RUN: %acpp %s -o %t --acpp-targets=omp --acpp-use-accelerated-cpu -O3
+// RUN: %acpp %s -o %t --acpp-targets=generic --acpp-use-accelerated-cpu -O3
 // RUN: %t | FileCheck %s
 
 #include <CL/sycl.hpp>
 #include <iostream>
 
 int main() {
-  constexpr size_t local_size = 257;
-  constexpr size_t global_size = 257;
+  constexpr size_t local_size = 256;
+  constexpr size_t global_size = 256*4;
 
   cl::sycl::queue queue;
   std::vector<int> host_buf;
@@ -21,7 +22,7 @@ int main() {
       using namespace cl::sycl::access;
       auto acc = buf.get_access<mode::read_write>(cgh);
       auto scratch =
-          cl::sycl::accessor<int, 1, mode::read_write, target::local>{32, cgh};
+          cl::sycl::accessor<int, 1, mode::read_write , target::local>{32, cgh};
 
       cgh.parallel_for<class dynamic_local_memory_reduction>(
           cl::sycl::nd_range<1>{global_size, local_size}, [=](cl::sycl::nd_item<1> item) noexcept {

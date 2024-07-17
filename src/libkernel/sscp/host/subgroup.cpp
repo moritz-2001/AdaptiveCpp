@@ -29,24 +29,22 @@
 #include "hipSYCL/compiler/cbs/IRUtils.hpp"
 #include "hipSYCL/sycl/libkernel/host/rv.h"
 #include "hipSYCL/sycl/libkernel/sscp/builtins/core.hpp"
-
-#define RV
-
+#include "hipSYCL/RV.h"
+//
 extern "C" size_t __hipsycl_cbs_local_id_subgroup;
 
 // TODO RV
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_local_id() {
-#ifdef RV
+#if USE_RV
   return rv_lane_id();
 #else
-
   return __hipsycl_cbs_local_id_subgroup;
 #endif
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_size() {
-#ifdef RV
+#if USE_RV
   return rv_num_lanes();
 #else
   if (const bool lastGroup = __acpp_sscp_get_num_subgroups() - 1 == __acpp_sscp_get_subgroup_id();
@@ -61,7 +59,7 @@ HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_size() {
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_max_size() {
-#ifdef RV
+#if USE_RV
   return rv_num_lanes();
 #else
   return hipsycl::compiler::SGSize;

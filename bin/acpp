@@ -1449,16 +1449,16 @@ class omp_accelerated_invocation:
         flags += [
             "-fplugin=" + config.acpp_plugin_path
             , "-fpass-plugin=" + config.acpp_plugin_path
-          #  , "-fplugin=" + config.rv_plugin_path
-         #   , "-fpass-plugin=" + config.rv_plugin_path
+           , "-fplugin=" + config.rv_plugin_path
+           , "-fpass-plugin=" + config.rv_plugin_path
             , "-D__HIPSYCL_USE_ACCELERATED_CPU__"
         ]
     flags += self._cxx_flags
 
     flags += ["-march=native"]
-  #  flags += ["-fno-unroll-loops"]
+    flags += ["-fno-unroll-loops"]
 
-  #  flags += ["-mllvm", "-rv"]
+    flags += ["-mllvm", "-rv"]
 
     return flags
 
