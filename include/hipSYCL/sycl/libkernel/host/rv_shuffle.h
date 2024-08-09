@@ -111,11 +111,11 @@ T shuffle_up_impl(T x, int offset) {
 }
 
 template <typename T> T shuffle_down_impl(T x, int offset) {
-    return apply_on_data(x, [offset](const float data) {
-      float ret = data;
+    return apply_on_data(x, [offset](const auto data) {
+      auto ret = data;
  #pragma unroll
       for (int i = 0; i < rv_num_lanes(); ++i) {
-        const float v = rv_extract(data, (offset + i) % rv_num_lanes());
+        const auto v = rv_extract(data, (offset + i) % rv_num_lanes());
         ret = rv_insert(ret, i, v);
       }
       return ret;

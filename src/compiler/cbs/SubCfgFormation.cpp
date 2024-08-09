@@ -2226,6 +2226,8 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
                                              Builder.getIntN(64, 32 * 1024)));
   }
   //F.viewCFG();
+  //F.addFnAttr(llvm::Attribute::OptimizeNone);
+  //F.addFnAttr(llvm::Attribute::NoInline);
   assert(!llvm::verifyFunction(F, &llvm::outs()));
 
   llvm::PreservedAnalyses PA;

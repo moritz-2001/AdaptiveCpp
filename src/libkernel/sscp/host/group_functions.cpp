@@ -25,12 +25,7 @@ extern "C" size_t __acpp_cbs_local_size_x;
 extern "C" size_t __acpp_cbs_local_size_y;
 extern "C" size_t __acpp_cbs_local_size_z;
 
-// extern "C" size_t __hipsycl_cbs_local_id_subgroup;
-
 // TODO CBS AND RV REDUCE MISSING OPS
-
-// TODO ANY and ALL IMPS do not work (Also, fix them in host/group_functions)
-// TODO WHY Do they not work?
 
 // TODO for scan no impls in header?
 
@@ -40,8 +35,6 @@ extern "C" size_t __acpp_cbs_local_size_z;
 
 // TODO Implement reduction for floats
 
-// optimization
-// HIPSYCL_SSCP_BUILTIN bool __acpp_sscp_if_global_sizes_fit_in_int() { return false; }
 
 size_t get_local_linear_id() {
   size_t lid_x = __acpp_cbs_local_id_x;
@@ -90,11 +83,15 @@ template <typename T> T work_broadcast(const int sender, T x) {
 }
 
 template <typename T> T sub_broadcast(const int sender, T x) {
-  T e = static_cast<uint64_t>(sender);
+#if USE_RV
+  return hipsycl::sycl::detail::extract_impl<T>(x, sender);
+#else
+  auto e = static_cast<uint64_t>(sender);
   __acpp_cbs_sub_barrier();
   auto t = __cbs_extract(x, e);
   __acpp_cbs_sub_barrier();
   return t;
+#endif
 }
 
 constexpr ReduceOp reduce_op_map(__acpp_sscp_algorithm_op op) {
