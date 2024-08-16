@@ -302,7 +302,7 @@ std::unique_ptr<RegionImpl> getRegion(llvm::Function &F, const llvm::LoopInfo &L
 // calculate uniformity analysis
 VectorizationInfo getVectorizationInfo(llvm::Function &F, Region &R, llvm::LoopInfo &LI,
                                        llvm::DominatorTree &DT, llvm::PostDominatorTree &PDT,
-                                       size_t Dim, State state) {
+                                       size_t Dim, State state, HierarchicalSplitInfo HI) {
   VectorizationInfo VecInfo{F, R};
   // seed varyingness
   for (size_t D = 0; D < Dim - 1; ++D) {
