@@ -286,11 +286,8 @@ template <typename T> T sub_select(T x, __acpp_uint32 delta) {
 #if USE_RV
   return hipsycl::sycl::detail::shuffle_impl(x, delta);
 #else
-  T *scratch = static_cast<T *>(sub_group_shared_memory);
-  auto lid = __acpp_sscp_get_subgroup_local_id();
-  scratch[lid] = x;
   __acpp_cbs_sub_barrier();
-  x = scratch[delta];
+  auto res = __cbs_shuffle(x, delta);
   __acpp_cbs_sub_barrier();
   return x;
 #endif

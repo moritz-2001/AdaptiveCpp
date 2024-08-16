@@ -152,7 +152,11 @@ public:
   static constexpr int dimensions = 1;
   static constexpr memory_scope fence_scope = memory_scope::sub_group;
 
-  sub_group() {}
+  sub_group() {
+    assert(false);
+  }
+
+  sub_group(size_t group_id, size_t num_subgroups, void* local_memory) : _group_id(group_id), _num_subgroups(num_subgroups), _local_memory(local_memory) {}
 
   HIPSYCL_KERNEL_TARGET
   id_type get_local_id() const { return id_type{get_local_linear_id()}; }
@@ -180,14 +184,12 @@ public:
 
   HIPSYCL_KERNEL_TARGET
   linear_id_type get_group_linear_id() const {
-    assert(false); // TODO implement
+    return _group_id;
   }
 
   HIPSYCL_KERNEL_TARGET
   linear_range_type get_group_linear_range() const {
-    // TODO WRONG
-    assert(false);
-    // return rv_num_lanes();
+    return _num_subgroups;
   }
 
   HIPSYCL_KERNEL_TARGET
@@ -204,6 +206,8 @@ public:
   void *get_local_memory_ptr() const { return _local_memory; }
 
 private:
+  size_t _group_id;
+  size_t _num_subgroups;
   void *_local_memory;
 };
 #else

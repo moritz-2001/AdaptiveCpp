@@ -214,7 +214,9 @@ struct nd_item
   HIPSYCL_KERNEL_TARGET
   sub_group get_sub_group() const
   {
-#if HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SSCP or USE_RV
+#if USE_RV and not HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SSCP
+    return sub_group{static_cast<uint32_t>(get_local_linear_id()) / SGSize, (get_local_range().size() + (SGSize-1)) / SGSize, _sub_local_memory_ptr};
+#elif HIPSYCL_LIBKERNEL_IS_DEVICE_PASS_SSCP
     return sub_group{};
 #else
     return sub_group{

@@ -313,6 +313,12 @@ VectorizationInfo getVectorizationInfo(llvm::Function &F, Region &R, llvm::LoopI
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[Dim - 1]),
                          VectorShape::cont());
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, cbs::SgIdGlobalName), VectorShape::cont());
+  VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
+
+  if (HI.ArgsToAloca)
+    for (auto& [Arg, Alloca] : *HI.ArgsToAloca) {
+      VecInfo.setPinnedShape(*Arg, VectorShape::varying());
+    }
 
   VectorizationAnalysis VecAna{VecInfo, LI, DT, PDT};
   VecAna.analyze();
@@ -706,10 +712,6 @@ void SubCFG::replicate(
   loadUniformAndRecalcContValues(BaseInstAllocaMap, ContInstReplicaMap, PreHeader_, VMap,
                                  loadToAlloca, state);
 
-  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
-    llvm::outs() << "REMAP SG: " << *VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] << "\n";
-  }
-
   llvm::SmallVector<llvm::BasicBlock *, 8> BlocksToRemap{NewBlocks_.begin(), NewBlocks_.end()};
   llvm::remapInstructionsInBlocks(BlocksToRemap, VMap);
 
@@ -722,7 +724,6 @@ void SubCFG::replicate(
   EntryBB_ = PreHeader_;
   ExitBB_ = Latches[0];
   HI.ContiguousIdx = Idx;
-  llvm::outs() << "WI BACK: " << *WIIndVars_.back() << "\n";
   HI.SGIdArg = WIIndVars_.back();
 }
 
@@ -1347,7 +1348,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
               return !SubCfgsBlocks.contains(UI->getParent());
             }))
           continue;
-        if (!isAllocaSubCfgInternal(Alloca, SubCfgs, DT))
+      // if (!isAllocaSubCfgInternal(Alloca, SubCfgs, DT))
           WL.push_back(Alloca);
       }
     }
@@ -1398,9 +1399,9 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
       if (Alloca->hasMetadata(MDKind::Arrayified))
         continue;
 
-      if (!isAllocaSubCfgInternal(Arg, SubCfgs, DT)) {
+   //  if (!isAllocaSubCfgInternal(Arg, SubCfgs, DT)) {
         WL.emplace_back(Alloca, Arg);
-      }
+     //}
     }
 
     // One of the problems is that the allocas are still stored in the entry of the work group
@@ -2016,7 +2017,7 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
 
   auto RImpl = getRegion(F, LI, Blocks);
   Region R{*RImpl};
-  auto VecInfo = getVectorizationInfo(F, R, LI, DT, PDT, state.Dim, state);
+  auto VecInfo = getVectorizationInfo(F, R, LI, DT, PDT, state.Dim, state, HI);
   VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   llvm::SmallPtrSet<llvm::BasicBlock *, 2> ExitingBlocks;

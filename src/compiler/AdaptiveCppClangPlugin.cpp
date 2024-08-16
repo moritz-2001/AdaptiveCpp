@@ -64,6 +64,19 @@
 namespace hipsycl {
 namespace compiler {
 
+class PrintPass : public llvm::PassInfoMixin<PrintPass> {
+public:
+  PrintPass() {}
+
+  static llvm::StringRef name() { return "rv::PrintPass"; }
+  llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager &) {
+    if (F.hasFnAttribute("iskernel")) {
+      F.viewCFG();
+    }
+    return llvm::PreservedAnalyses::all();
+  }
+};
+
 static llvm::cl::opt<bool> EnableLLVMSSCP{
     "hipsycl-sscp", llvm::cl::init(false),
     llvm::cl::desc{"Enable AdaptiveCpp LLVM SSCP compilation flow"}};
@@ -192,6 +205,13 @@ extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginIn
             if(!CompilationStateManager::getASTPassState().isDeviceCompilation())
               FPM.addPass(LoopsParallelMarkerPass{});
           });
+          PB.registerOptimizerLastEPCallback(
+      [&](llvm::ModulePassManager &MPM,
+          llvm::OptimizationLevel Level) {
+          llvm::FunctionPassManager FPM;
+          //FPM.addPass(PrintPass());
+          MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
+      });
 #endif
         }
   };
