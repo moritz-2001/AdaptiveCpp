@@ -289,7 +289,7 @@ template <typename T> T sub_select(T x, __acpp_uint32 delta) {
   __acpp_cbs_sub_barrier();
   auto res = __cbs_shuffle(x, delta);
   __acpp_cbs_sub_barrier();
-  return x;
+  return res;
 #endif
 }
 
