@@ -765,7 +765,7 @@ class acpp_config:
 
   @property
   def rv_plugin_path(self):
-    return "/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so"
+    return "/usr/local/lib/RVPLUG.so"
 
   @property
   def sequential_link_line(self):

@@ -171,8 +171,8 @@ bool LLVMToHostTranslator::translateToBackendFormat(llvm::Module &FlavoredModule
       "-Wno-pass-failed",
       "-fPIC",
 #if USE_RV
-      "-fplugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
-      "-fpass-plugin=/home/moritz/Projects/Bachelor/llvm-project/llvm/build/lib/RVPLUG.so",
+      "-fplugin=/usr/local/lib/RVPLUG.so",
+      "-fpass-plugin=/usr/local/lib/RVPLUG.so",
 #endif
       "-o",
       OutputFilename,
