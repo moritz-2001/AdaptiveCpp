@@ -6,8 +6,8 @@
 #include <iostream>
 
 int main() {
-  constexpr size_t local_size = 256;
-  constexpr size_t global_size = 256*2;
+  constexpr size_t local_size = 64;
+  constexpr size_t global_size = 64;
 
   std::vector<int> host_buf(global_size, 0);
   std::iota(host_buf.begin(), host_buf.end(), 0);
@@ -27,7 +27,7 @@ int main() {
             const auto sg = item.get_sub_group();
 
             auto val = acc[item.get_global_id()];
-            acc[item.get_global_id()] = cl::sycl::select_from_group(sg, val, 1);
+            acc[item.get_global_id()] = cl::sycl::select_from_group(sg, sg.get_local_linear_id(), 1);
           });
     });
   }
@@ -35,7 +35,9 @@ int main() {
   // CHECK: 1
   std::cout << host_buf[1] << "\n";
   // CHECK: 1
+  std::cout << host_buf[1] << "\n";
+  // CHECK: 1
   std::cout << host_buf[31] << "\n";
-  // CHECK: 33
+  // CHECK: 1
   std::cout << host_buf[32] << "\n";
 }

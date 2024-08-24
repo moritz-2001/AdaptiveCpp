@@ -45,7 +45,7 @@ HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_local_id() {
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_size() {
 #if USE_RV
-  return rv_num_lanes();
+  return __acpp_sscp_get_subgroup_max_size();
 #else
   if (const bool lastGroup = __acpp_sscp_get_num_subgroups() - 1 == __acpp_sscp_get_subgroup_id();
       not lastGroup) {
@@ -59,11 +59,7 @@ HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_size() {
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_max_size() {
-#if USE_RV
-  return rv_num_lanes();
-#else
   return hipsycl::compiler::SGSize;
-#endif
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_id() {
