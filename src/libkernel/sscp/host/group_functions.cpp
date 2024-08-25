@@ -221,7 +221,16 @@ template <typename T> T sub_shift_left(T x, __acpp_uint32 delta) {
 #if USE_RV
   return hipsycl::sycl::detail::shuffle_down_impl<T>(x, static_cast<int>(delta));
 #else
-
+#if USE_CBS_SHUFFLE
+  __acpp_cbs_sub_barrier();
+  const auto pos =
+      __acpp_sscp_get_subgroup_local_id() + delta >= __acpp_sscp_get_subgroup_max_size()
+          ? 0
+          : __acpp_sscp_get_subgroup_local_id() + delta;
+  auto tmp = __cbs_shuffle(x, pos);
+  __acpp_cbs_sub_barrier();
+  return tmp;
+#else
   T *scratch = static_cast<T *>(sub_group_shared_memory);
   auto lid = __acpp_sscp_get_subgroup_local_id();
   auto target_lid = lid + delta;
@@ -235,7 +244,7 @@ template <typename T> T sub_shift_left(T x, __acpp_uint32 delta) {
   x = scratch[target_lid];
   __acpp_cbs_sub_barrier();
   return x;
-
+#endif
 #endif
 }
 
@@ -263,6 +272,16 @@ template <typename T> T sub_shift_right(T x, __acpp_uint32 delta) {
 #if USE_RV
   return hipsycl::sycl::detail::shuffle_up_impl(x, delta);
 #else
+#if USE_CBS_SHUFFLE
+  __acpp_cbs_sub_barrier();
+  const auto pos =
+      __acpp_sscp_get_subgroup_local_id() - delta >= __acpp_sscp_get_subgroup_max_size()
+          ? __acpp_sscp_get_subgroup_max_size() - 1
+          : __acpp_sscp_get_subgroup_local_id() - delta;
+  auto tmp = __cbs_shuffle(x, pos);
+  __acpp_cbs_sub_barrier();
+  return tmp;
+#else
   T *scratch = static_cast<T *>(sub_group_shared_memory);
 
   const auto lid = __acpp_sscp_get_subgroup_local_id();
@@ -279,16 +298,7 @@ template <typename T> T sub_shift_right(T x, __acpp_uint32 delta) {
   x = scratch[target_lid];
   __acpp_cbs_sub_barrier();
   return x;
-  /*
-  __acpp_cbs_sub_barrier();
-  const auto pos =
-      __acpp_sscp_get_subgroup_local_id() - delta >= __acpp_sscp_get_subgroup_max_size()
-          ? 0
-          : __acpp_sscp_get_subgroup_local_id() - delta;
-  auto tmp = __cbs_shuffle(x, pos);
-  __acpp_cbs_sub_barrier();
-  return tmp;
-  */
+#endif
 #endif
 }
 
@@ -316,10 +326,20 @@ template <typename T> T sub_select(T x, __acpp_uint32 delta) {
 #if USE_RV
   return hipsycl::sycl::detail::shuffle_impl(x, delta);
 #else
+#if USE_CBS_SHUFFLE
   __acpp_cbs_sub_barrier();
   auto res = __cbs_shuffle(x, delta);
   __acpp_cbs_sub_barrier();
   return res;
+#else
+  T *scratch = static_cast<T *>(sub_group_shared_memory);
+  auto lid = __acpp_sscp_get_subgroup_local_id();
+  scratch[lid] = x;
+  __acpp_cbs_sub_barrier();
+  x = scratch[delta];
+  __acpp_cbs_sub_barrier();
+  return x;
+#endif
 #endif
 }
 

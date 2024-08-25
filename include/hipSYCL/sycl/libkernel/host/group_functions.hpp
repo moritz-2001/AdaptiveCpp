@@ -352,7 +352,17 @@ HIPSYCL_KERNEL_TARGET T __acpp_shift_group_left(sub_group g, T x,
 #if USE_RV
   return shuffle_down_impl(x, delta);
 #else
+  if constexpr (std::is_integral_v<T> and USE_CBS_SHUFFLE) {
+    __acpp_group_barrier(g);
+    const auto pos = g.get_local_linear_id() + delta >= g.get_local_range().size()
+                         ? 0
+                         : g.get_local_linear_id() + delta;
+    auto tmp = __cbs_shuffle(x, pos);
+    __acpp_group_barrier(g);
+    return tmp;
+  } else {
     T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+
     auto lid = g.get_local_linear_id();
     auto target_lid = lid + delta;
 
@@ -365,6 +375,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_shift_group_left(sub_group g, T x,
     T tmp = scratch[target_lid];
     __acpp_group_barrier(g);
     return tmp;
+  }
 #endif
 }
 
@@ -374,12 +385,10 @@ HIPSYCL_KERNEL_TARGET T __acpp_shift_group_right(sub_group g, T x,
 #if USE_RV
   return shuffle_up_impl(x, delta);
 #else
-  if constexpr (std::is_integral_v<T>) {
+  if constexpr (std::is_integral_v<T> and USE_CBS_SHUFFLE) {
     __acpp_group_barrier(g);
-    // TODO DOES THIS WORK
-    // TODO 31 magic constant
     const auto pos = g.get_local_linear_id() - delta >= g.get_local_range().size()
-                         ? 31
+                         ? g.get_max_local_range().size()
                          : g.get_local_linear_id() - delta;
     auto tmp = __cbs_shuffle(x, pos);
     __acpp_group_barrier(g);
@@ -777,7 +786,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_select_from_group(sub_group g, T x,
 #if USE_RV
   return shuffle_impl(x, remote_local_id);
 #else
-  if constexpr (std::is_integral_v<T>) {
+  if constexpr (std::is_integral_v<T> and USE_CBS_SHUFFLE) {
     __acpp_group_barrier(g);
     auto tmp = __cbs_shuffle(x, remote_local_id);
     __acpp_group_barrier(g);
