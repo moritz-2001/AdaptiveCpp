@@ -1353,8 +1353,6 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
       }
     }
 
-    llvm::outs() << "WL NOT SIZE: " << WLNot.size() << "\n";
-
     for (auto* Alloca : WLNot) {
       auto* BB = llvm::dyn_cast<llvm::Instruction>(Alloca->uses().begin()->getUser())->getParent();
       auto it = std::find_if(SubCfgs.begin(), SubCfgs.end(), [&](SubCFG& SubCfg) {
@@ -1734,23 +1732,33 @@ class ReduceIntrinsic final : public CBSIntrinsic {
 
   std::pair<llvm::Value *, Shape> vectorizeValue(llvm::Instruction *VLoad, llvm::IRBuilder<> &Builder,
                                                  llvm::CallInst &Intrinsic) override {
-    const auto *Type = llvm::dyn_cast<llvm::IntegerType>(Intrinsic.getOperand(0)->getType());
+    auto *Type = Intrinsic.getOperand(0)->getType();
     const auto *Idx = llvm::dyn_cast<llvm::ConstantInt>(Intrinsic.getOperand(1));
     assert(Idx and "Op must be constant int");
     assert(Type and "Must be integer type");
-    const bool isSigned = Type->getSignBit() > 0;
     const auto v = Idx->getSExtValue();
-    if (v == 0) {
-      return {Builder.CreateAddReduce(VLoad), Shape::UNIFORM};
-    }
-    if (v == 1) {
-      return {Builder.CreateMulReduce(VLoad), Shape::UNIFORM};
-    }
-    if (v == 2) {
-      return {Builder.CreateIntMinReduce(VLoad, isSigned), Shape::UNIFORM};
-    }
-    if (v == 3) {
-      return {Builder.CreateIntMaxReduce(VLoad, isSigned), Shape::UNIFORM};
+    if (Type->isIntegerTy()) {
+      const bool isSigned = llvm::dyn_cast<llvm::IntegerType>(Type)->getSignBit() > 0;
+      if (v == 0) {
+        return {Builder.CreateAddReduce(VLoad), Shape::UNIFORM};
+      } else if (v == 1) {
+        return {Builder.CreateMulReduce(VLoad), Shape::UNIFORM};
+      } else if (v == 2) {
+        return {Builder.CreateIntMinReduce(VLoad, isSigned), Shape::UNIFORM};
+      } else if (v == 3) {
+        return {Builder.CreateIntMaxReduce(VLoad, isSigned), Shape::UNIFORM};
+      }
+    } else {
+      assert(Type->isFloatingPointTy());
+      if (v == 0) {
+        return {Builder.CreateFAddReduce(llvm::ConstantFP::getNegativeZero(Type), VLoad), Shape::UNIFORM};
+      } else if (v == 1) {
+        return {Builder.CreateFMulReduce(llvm::ConstantFP::get(Type, 1.0), VLoad), Shape::UNIFORM};
+      } else if (v == 2) {
+        return {Builder.CreateFPMinReduce(VLoad), Shape::UNIFORM};
+      } else if (v == 3) {
+        return {Builder.CreateFPMaxReduce(VLoad), Shape::UNIFORM};
+      }
     }
     assert(false);
     return {};
@@ -1758,23 +1766,33 @@ class ReduceIntrinsic final : public CBSIntrinsic {
 
   llvm::Value* neutralElement(llvm::VectorType* Type, llvm::IRBuilder<> &Builder, llvm::CallInst &Intrinsic) const override {
     auto Idx = llvm::dyn_cast<llvm::ConstantInt>(Intrinsic.getOperand(1))->getSExtValue();
-    if (Idx == 0) {
-      return llvm::ConstantInt::get(Type, 0);
-    }
-    if (Idx == 1) {
-      return llvm::ConstantInt::get(Type, 1);
-    }
-    if (Idx == 2) {
-      auto BitWidth = Type->getElementType()->getIntegerBitWidth();
-      auto IsSigned = llvm::dyn_cast<llvm::IntegerType>(Type->getElementType())->getSignBit() > 0;
-      auto Integer = IsSigned ? llvm::APInt::getSignedMaxValue(BitWidth) : llvm::APInt::getMaxValue(BitWidth);
-      return llvm::ConstantInt::get(Type, Integer);
-    }
-    if (Idx == 3) {
-      auto BitWidth = Type->getElementType()->getIntegerBitWidth();
-      auto IsSigned = llvm::dyn_cast<llvm::IntegerType>(Type->getElementType())->getSignBit() > 0;
-      auto Integer = IsSigned ? llvm::APInt::getSignedMinValue(BitWidth) : llvm::APInt::getMinValue(BitWidth);
-      return llvm::ConstantInt::get(Type, Integer);
+    if (Type->getElementType()->isIntegerTy()) {
+      if (Idx == 0) {
+        return llvm::ConstantInt::get(Type, 0);
+      } else if (Idx == 1) {
+        return llvm::ConstantInt::get(Type, 1);
+      } else if (Idx == 2) {
+        auto BitWidth = Type->getElementType()->getIntegerBitWidth();
+        auto IsSigned = llvm::dyn_cast<llvm::IntegerType>(Type->getElementType())->getSignBit() > 0;
+        auto Integer = IsSigned ? llvm::APInt::getSignedMaxValue(BitWidth) : llvm::APInt::getMaxValue(BitWidth);
+        return llvm::ConstantInt::get(Type, Integer);
+      } else if (Idx == 3) {
+        auto BitWidth = Type->getElementType()->getIntegerBitWidth();
+        auto IsSigned = llvm::dyn_cast<llvm::IntegerType>(Type->getElementType())->getSignBit() > 0;
+        auto Integer = IsSigned ? llvm::APInt::getSignedMinValue(BitWidth) : llvm::APInt::getMinValue(BitWidth);
+        return llvm::ConstantInt::get(Type, Integer);
+      }
+    } else {
+      assert(Type->getElementType()->isFloatingPointTy());
+      if (Idx == 0) {
+        return llvm::ConstantFP::get(Type, -0.0);
+      } else if (Idx == 1) {
+        return llvm::ConstantFP::get(Type, 1.0);
+      } else if (Idx == 2) {
+        return llvm::ConstantFP::get(Type, std::numeric_limits<double>::infinity());
+      } else if (Idx == 3) {
+        return llvm::ConstantFP::get(Type, -std::numeric_limits<double>::infinity());
+      }
     }
 
     assert(false);

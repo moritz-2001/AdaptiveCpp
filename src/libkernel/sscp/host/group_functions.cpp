@@ -68,6 +68,14 @@ size_t get_local_size() {
   MACRO(work, int16, i16) MACRO(work, int32, i32) MACRO(work, int64, i64) MACRO(work, uint8, u8)   \
       MACRO(work, uint16, u16) MACRO(work, uint32, u32) MACRO(work, uint64, u64)
 
+#define ALL_F(MACRO) \
+	MACRO(sub, f16, f16) \
+MACRO(sub, f32, f32) \
+MACRO(sub, f64, f64) \
+MACRO(work, f16, f16) \
+MACRO(work, f32, f32) \
+MACRO(work, f64, f64)
+
 template <typename T> T work_broadcast(const int sender, T x) {
   T *scratch = static_cast<T *>(work_group_shared_memory);
 
@@ -114,7 +122,7 @@ constexpr ReduceOp reduce_op_map(__acpp_sscp_algorithm_op op) {
   return ReduceOp::NOT_SUPPORTED;
 }
 
-template <typename T> constexpr T binary_op(__acpp_sscp_algorithm_op op, T x, T y) {
+template <typename T, std::enable_if_t<std::is_integral_v<T>, bool> = true> constexpr T binary_op(__acpp_sscp_algorithm_op op, T x, T y) {
   switch (op) {
   case __acpp_sscp_algorithm_op::plus:
     return x + y;
@@ -134,6 +142,28 @@ template <typename T> constexpr T binary_op(__acpp_sscp_algorithm_op op, T x, T 
     return x and y;
   case __acpp_sscp_algorithm_op::logical_or:
     return x or y;
+  }
+  assert(false);
+  return {};
+}
+
+template <typename T, std::enable_if_t<not std::is_integral_v<T>, bool> = true> constexpr T binary_op(__acpp_sscp_algorithm_op op, T x, T y) {
+  switch (op) {
+  case __acpp_sscp_algorithm_op::plus:
+    return x + y;
+  case __acpp_sscp_algorithm_op::multiply:
+    return x * y;
+  case __acpp_sscp_algorithm_op::min:
+    return std::min(x, y);
+  case __acpp_sscp_algorithm_op::max:
+    return std::max(x, y);
+  case __acpp_sscp_algorithm_op::logical_and:
+    return x and y;
+  case __acpp_sscp_algorithm_op::logical_or:
+    return x or y;
+  case __acpp_sscp_algorithm_op::bit_and:
+  case __acpp_sscp_algorithm_op::bit_or:
+  case __acpp_sscp_algorithm_op::bit_xor:
   }
   assert(false);
   return {};
@@ -349,6 +379,71 @@ bool __acpp_sscp_work_group_none(bool pred) { return __acpp_sscp_work_group_all(
 HIPSYCL_SSCP_CONVERGENT_BUILTIN
 bool __acpp_sscp_sub_group_none(bool pred) { return __acpp_sscp_sub_group_all(not pred); }
 
+
+template <typename T> T sub_inclusive_scan(__acpp_sscp_algorithm_op op, T x) {
+  const size_t lid = __acpp_sscp_get_subgroup_local_id();
+  const size_t lrange = __acpp_sscp_get_subgroup_size();
+#if USE_RV
+  auto local_x = x;
+#pragma unroll
+  for (size_t i = 1; i < lrange; i *= 2) {
+    auto other_x = sub_shift_right(local_x, i);
+    if (i <= lid)
+      local_x = binary_op(op, local_x, other_x);
+  }
+  return local_x;
+#else
+  T *scratch = static_cast<T *>(sub_group_shared_memory);
+
+  scratch[lid] = x;
+  __acpp_cbs_sub_barrier();
+
+  if (lid == 0) {
+    for (int i = 1; i < lrange; ++i)
+      scratch[i] = binary_op(op, scratch[i], scratch[i - 1]);
+  }
+
+  __acpp_cbs_sub_barrier();
+  T tmp = scratch[lid];
+  __acpp_cbs_sub_barrier();
+
+  return tmp;
+#endif
+}
+
+template <typename T> T work_inclusive_scan(__acpp_sscp_algorithm_op op, T x) {
+  T *scratch = static_cast<T *>(work_group_shared_memory);
+  size_t sgId = __acpp_sscp_get_subgroup_id();
+  __acpp_cbs_barrier();
+
+  x = sub_inclusive_scan(op, x);
+
+  __acpp_cbs_barrier();
+
+
+  // Last work-item in sub-group
+  if (__acpp_sscp_get_subgroup_local_id() + 1 == __acpp_sscp_get_subgroup_size()) {
+    // sg group id
+    scratch[sgId] = x;
+  }
+  __acpp_cbs_barrier();
+  if (get_local_linear_id() == 0) {
+    for (auto i = 1ul; i < __acpp_sscp_get_num_subgroups(); ++i) {
+      scratch[i] = binary_op(op, scratch[i - 1], scratch[i]);
+    }
+  }
+  __acpp_cbs_barrier();
+
+  // Not the first sub-group
+  if (sgId > 0) {
+    x = binary_op(op, scratch[sgId - 1], x);
+  }
+  __acpp_cbs_barrier();
+  return x;
+}
+
+
+
 // TODO floats
 #define REDUCE(LEVEL, T, TNAME)                                                                    \
   HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_reduce_##TNAME(           \
@@ -382,10 +477,21 @@ bool __acpp_sscp_sub_group_none(bool pred) { return __acpp_sscp_sub_group_all(no
     return LEVEL##_select(x, delta);                                                               \
   };
 
+#define INCLUSIVE_SCAN(LEVEL, T, TNAME)                                                                    \
+HIPSYCL_SSCP_CONVERGENT_BUILTIN __acpp_##T __acpp_sscp_##LEVEL##_group_inclusive_scan_##TNAME(           \
+__acpp_sscp_algorithm_op op, __acpp_##T x) {                                                 \
+return LEVEL##_inclusive_scan(op, x);                                                                  \
+};
+
+// TODO ALL VARIANTS DOES NOT SUPPORT FLOATS
+
 ALL_VARIANTS(BROADCAST)
 ALL_VARIANTS(REDUCE)
 ALL_VARIANTS(SHIFT_LEFT)
 ALL_VARIANTS(SHIFT_RIGHT)
 ALL_VARIANTS(SELECT)
+ALL_VARIANTS(INCLUSIVE_SCAN)
 
-// TODO SCAN
+
+ALL_F(INCLUSIVE_SCAN)
+ALL_F(REDUCE)
