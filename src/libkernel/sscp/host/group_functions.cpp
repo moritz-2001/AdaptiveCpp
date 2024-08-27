@@ -434,7 +434,6 @@ template <typename T> T sub_inclusive_scan(__acpp_sscp_algorithm_op op, T x) {
 template <typename T> T work_inclusive_scan(__acpp_sscp_algorithm_op op, T x) {
   T *scratch = static_cast<T *>(work_group_shared_memory);
   size_t sgId = __acpp_sscp_get_subgroup_id();
-  __acpp_cbs_barrier();
 
   x = sub_inclusive_scan(op, x);
 
