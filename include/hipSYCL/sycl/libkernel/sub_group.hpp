@@ -43,7 +43,6 @@
 namespace hipsycl {
 namespace sycl {
 
-
 class sub_group
 {
 public:

@@ -63,31 +63,47 @@ __acpp_group_barrier(sub_group g,
   // doesn't need sync
 }
 
+template<typename T, typename BinaryOperation>
+HIPSYCL_KERNEL_TARGET
+T __acpp_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
+  return x;
+}
+
+
 namespace detail {
 // reduce implementation
 template <int Dim, typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __acpp_group_reduce(group<Dim> g, T x,
                                                BinaryOperation binary_op,
                                                T *scratch) {
-  const size_t lid = g.get_local_linear_id();
+  const auto lid = g.get_local_linear_id();
+  const std::size_t local_range = g.get_local_linear_range();
+  sub_group sg{};
 
-  scratch[lid] = x;
-  __acpp_group_barrier(g);
+  T result = reduce_over_group(sg, x, binary_op);
 
+  // Collect results from sub-groups
+  if (sg.leader()) {
+    scratch[g.get_local_linear_id()] = result;
+  }
+
+  __acpp_group_barrier(g); // as this starts a new loop with CBS,
+  // LLVM detects it's actually just one iteration and optimizes it
+
+  // First work-item does reduction on the results of the sub-group reductions
   if (g.leader()) {
-    T result = scratch[0];
-
-    for (int i = 1; i < g.get_local_range().size(); ++i)
-      result = binary_op(result, scratch[i]);
-
-    scratch[0] = result;
+    T y = scratch[0];
+    for (uint32_t j = 1u; j < g.get_local_linear_range(); j += 1ul) {
+      y = binary_op(y, scratch[j]);
+    }
+    scratch[0] = y;
   }
 
   __acpp_group_barrier(g);
-  T tmp = scratch[0];
+  T endResult = scratch[0];
   __acpp_group_barrier(g);
 
-  return tmp;
+  return endResult;
 }
 
 } // namespace detail
@@ -362,11 +378,6 @@ T __acpp_reduce_over_group(group<Dim> g, T x, BinaryOperation binary_op) {
   return tmp;
 }
 
-template<typename T, typename BinaryOperation>
-HIPSYCL_KERNEL_TARGET
-T __acpp_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
-  return x;
-}
 
 // exclusive_scan
 namespace detail { // until scoped-parallelism can be detected
@@ -504,31 +515,43 @@ __acpp_joint_inclusive_scan(Group g, InPtr first, InPtr last, OutPtr result,
       g, first, last, result, binary_op,
       typename std::remove_pointer_t<InPtr>{});
 }
-template <int Dim, typename T, typename BinaryOperation>
-HIPSYCL_KERNEL_TARGET
-T __acpp_inclusive_scan_over_group(
-    group<Dim> g, T x, BinaryOperation binary_op) {
-  T *          scratch = static_cast<T *>(g.get_local_memory_ptr());
-  const size_t lid     = g.get_local_linear_id();
-
-  scratch[lid] = x;
-  __acpp_group_barrier(g);
-
-  if (g.leader()) {
-    for (int i = 1; i < g.get_local_range().size(); ++i)
-      scratch[i] = binary_op(scratch[i], scratch[i - 1]);
-  }
-
-  __acpp_group_barrier(g);
-  T tmp = scratch[lid];
-  __acpp_group_barrier(g);
-
-  return tmp;
-}
 
 template <typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __acpp_inclusive_scan_over_group(
     sub_group g, T x, BinaryOperation binary_op) {
+  return x;
+}
+
+template <int Dim, typename T, typename BinaryOperation>
+HIPSYCL_KERNEL_TARGET
+T __acpp_inclusive_scan_over_group(
+    group<Dim> g, T x, BinaryOperation binary_op) {
+  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+  auto sg = sub_group{};
+  size_t sgId = g.get_local_linear_id();
+
+  x = __acpp_inclusive_scan_over_group(sg, x, binary_op);
+
+  __acpp_group_barrier(g);
+
+  // Last work-item in sub-group
+  if (sg.get_local_linear_id() + 1ul == sg.get_local_linear_range()) {
+    scratch[sgId] = x;
+  }
+  __acpp_group_barrier(g);
+
+  if (g.leader()) {
+    for (auto i = 1ul; i < g.get_local_linear_range(); ++i) {
+      scratch[i] = binary_op(scratch[i - 1], scratch[i]);
+    }
+  }
+  __acpp_group_barrier(g);
+
+  // Not the first sub-group
+  if (g.get_local_linear_id() >= sg.get_local_linear_range()) {
+    x = binary_op(scratch[g.get_local_linear_id() / sg.get_local_linear_range() - 1], x);
+  }
+  __acpp_group_barrier(g);
   return x;
 }
 
