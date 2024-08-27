@@ -195,7 +195,7 @@ template <typename T> T work_reduce(__acpp_sscp_algorithm_op op, T x) {
   // Collect results from sub-groups
   if (__acpp_sscp_get_subgroup_local_id() == 0) {
     // Use sg-id
-    scratch[lid] = result;
+    scratch[__acpp_sscp_get_subgroup_id()] = result;
   }
 
   __acpp_cbs_barrier(); // as this starts a new loop with CBS,
@@ -203,8 +203,8 @@ template <typename T> T work_reduce(__acpp_sscp_algorithm_op op, T x) {
 
   // First work-item does reduction on the results of the sub-group reductions
   if (lid == 0) {
-    T y{};
-    for (uint32_t j = 0u; j < local_range; j += __acpp_sscp_get_subgroup_size()) {
+    T y = scratch[0];
+    for (uint32_t j = 1u; j < __acpp_sscp_get_num_subgroups(); j += 1) {
       y = binary_op(op, y, scratch[j]);
     }
     scratch[0] = y;

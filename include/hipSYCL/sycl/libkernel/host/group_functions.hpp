@@ -76,7 +76,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_group_reduce(group<Dim> g, T x, BinaryOperation b
 
   // Collect results from sub-groups
   if (sg.leader()) {
-    scratch[g.get_local_linear_id()] = result;
+    scratch[sg.get_group_linear_id()] = result;
   }
 
   __acpp_group_barrier(g); // as this starts a new loop with CBS,
@@ -84,8 +84,8 @@ HIPSYCL_KERNEL_TARGET T __acpp_group_reduce(group<Dim> g, T x, BinaryOperation b
 
   // First work-item does reduction on the results of the sub-group reductions
   if (g.leader()) {
-    T y{};
-    for (uint32_t j = 0u; j < local_range; j += sg.get_local_linear_range()) {
+    T y = scratch[0];
+    for (uint32_t j = 1u; j < sg.get_group_linear_range(); j += 1ul) {
       y = binary_op(y, scratch[j]);
     }
     scratch[0] = y;
