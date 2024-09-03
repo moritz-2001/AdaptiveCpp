@@ -456,7 +456,6 @@ template <typename BinaryOperation, typename T> constexpr int reduce_supported_o
 
 template <typename T, typename BinaryOperation>
 HIPSYCL_KERNEL_TARGET T __acpp_reduce_over_group(sub_group g, T x, BinaryOperation binary_op) {
-  // TODO floating point numners
   static_assert(std::is_fundamental_v<T>);
   constexpr int op = reduce_supported_op<BinaryOperation, T>();
 #if USE_RV
@@ -478,13 +477,21 @@ HIPSYCL_KERNEL_TARGET T __acpp_reduce_over_group(sub_group g, T x, BinaryOperati
     __acpp_group_barrier(g);
     return tmp;
   } else {
-    auto local_x = x;
-#pragma unroll
-    for (auto i = g.get_local_linear_range() / 2; i > 0; i /= 2) {
-      auto other_x = __acpp_shift_group_left(g, local_x, i);
-      local_x = binary_op(local_x, other_x);
-    }
-    return __acpp_group_broadcast(g, local_x, 0);
+
+ 	T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+	scratch[g.get_local_linear_id()] = x;
+	__acpp_group_barrier(g);
+
+	if (g.leader()) {
+		for (auto i = 1ul; i < g.get_local_linear_range(); ++i) {
+			scratch[0] = binary_op(scratch[0], scratch[i]);
+		}
+	}
+
+	__acpp_group_barrier(g);
+	auto result = scratch[0];
+	__acpp_group_barrier(g);
+	return result;
   }
 #endif
 }
