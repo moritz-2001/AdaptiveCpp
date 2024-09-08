@@ -1345,9 +1345,10 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
           continue;
 
         auto shape = VecInfo.getVectorShape(*Alloca);
-        if (!isAllocaSubCfgInternal(Alloca, SubCfgs, DT)) {
+        if (not USE_RV and !isAllocaSubCfgInternal(Alloca, SubCfgs, DT)) {
           WL.push_back(Alloca);
         } else if (not shape.isUniform()) {
+          WL.push_back(Alloca);
           //llvm::outs() << "ALLOCA: " << *Alloca << "\n";;
         }
       }
