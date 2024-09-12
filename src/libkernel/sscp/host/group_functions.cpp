@@ -434,10 +434,8 @@ template <typename T> T work_inclusive_scan(__acpp_sscp_algorithm_op op, T x) {
 
   x = sub_inclusive_scan(op, x);
 
-  __acpp_cbs_barrier();
-
   // Last work-item in sub-group
-  if (sgId + 1 == __acpp_sscp_get_subgroup_size()) {
+  if (__acpp_sscp_get_subgroup_local_id() + 1 == __acpp_sscp_get_subgroup_size()) {
     // sg group id
     scratch[sgId] = x;
   }
