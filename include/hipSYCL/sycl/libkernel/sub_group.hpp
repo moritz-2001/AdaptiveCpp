@@ -184,7 +184,7 @@ public:
 
   HIPSYCL_KERNEL_TARGET
   linear_id_type get_group_linear_id() const {
-    return _group_id;
+    return rv_is_uniform(_group_id);
   }
 
   HIPSYCL_KERNEL_TARGET

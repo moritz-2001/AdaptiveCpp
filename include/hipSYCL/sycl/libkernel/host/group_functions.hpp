@@ -100,6 +100,15 @@ HIPSYCL_KERNEL_TARGET T __acpp_group_reduce(group<Dim> g, T x, BinaryOperation b
 
 } // namespace detail
 
+template <int Dim, typename T, typename BinaryOperation>
+HIPSYCL_KERNEL_TARGET T __acpp_reduce_over_group(group<Dim> g, T x, BinaryOperation binary_op) {
+  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
+
+  T tmp = detail::__acpp_group_reduce(g, x, binary_op, scratch);
+
+  return tmp;
+}
+
 // broadcast
 template <int Dim, typename T>
 HIPSYCL_KERNEL_TARGET T
@@ -177,21 +186,7 @@ HIPSYCL_KERNEL_TARGET bool __acpp_joint_any_of(Group g, Ptr first, Ptr last, Pre
 }
 
 template <int Dim> HIPSYCL_KERNEL_TARGET inline bool __acpp_any_of_group(group<Dim> g, bool pred) {
-  bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
-
-  scratch[0] = false;
-  __acpp_group_barrier(g);
-
-  if (pred)
-    scratch[0] = pred;
-
-  __acpp_group_barrier(g);
-
-  const bool tmp = scratch[0];
-
-  __acpp_group_barrier(g);
-
-  return tmp;
+  return __acpp_reduce_over_group(g, static_cast<uint8_t>(pred), sycl::maximum<uint8_t>{}) > 0;
 }
 
 HIPSYCL_KERNEL_TARGET
@@ -234,21 +229,7 @@ HIPSYCL_KERNEL_TARGET bool __acpp_joint_all_of(Group g, Ptr first, Ptr last, Pre
 }
 
 template <int Dim> HIPSYCL_KERNEL_TARGET inline bool __acpp_all_of_group(group<Dim> g, bool pred) {
-  bool *scratch = static_cast<bool *>(g.get_local_memory_ptr());
-
-  scratch[0] = true;
-  __acpp_group_barrier(g);
-
-  if (!pred)
-    scratch[0] = pred;
-
-  __acpp_group_barrier(g);
-
-  const bool tmp = scratch[0];
-
-  __acpp_group_barrier(g);
-
-  return tmp;
+  return __acpp_reduce_over_group(g, static_cast<uint8_t>(pred), sycl::minimum<uint8_t>{}) > 0;
 }
 
 HIPSYCL_KERNEL_TARGET
@@ -430,14 +411,6 @@ HIPSYCL_KERNEL_TARGET T __acpp_joint_reduce(Group g, Ptr first, Ptr last, T init
   return __acpp_group_broadcast(g, result);
 }
 
-template <int Dim, typename T, typename BinaryOperation>
-HIPSYCL_KERNEL_TARGET T __acpp_reduce_over_group(group<Dim> g, T x, BinaryOperation binary_op) {
-  T *scratch = static_cast<T *>(g.get_local_memory_ptr());
-
-  T tmp = detail::__acpp_group_reduce(g, x, binary_op, scratch);
-
-  return tmp;
-}
 
 template <typename BinaryOperation, typename T> constexpr int reduce_supported_op() {
   if constexpr (std::is_integral_v<T> or std::is_same_v<T, size_t>) {
