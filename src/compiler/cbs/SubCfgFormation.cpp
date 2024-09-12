@@ -718,7 +718,7 @@ void SubCFG::replicate(
   EntryBB_ = PreHeader_;
   ExitBB_ = Latches[0];
   HI.ContiguousIdx = Idx;
-  HI.SGIdArg = WIIndVars_.back();
+  HI.SGIdArg = HI.Level == HierarchicalLevel::H_CBS_SUBGROUP ? WIIndVars_.back() : nullptr;
 }
 
 // remove incoming PHI blocks that no longer actually have an edge to the PHI
@@ -2187,6 +2187,10 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
   Builder.SetInsertPoint(F.getEntryBlock().getTerminator());
   llvm::Instruction *IndVar = Builder.CreateLoad(
       state.SizeT, llvm::UndefValue::get(llvm::PointerType::get(state.SizeT, 0)));
+
+  if constexpr (USE_RV) {
+    assert(not utils::hasSubBarriers(F, SAA));
+  }
 
   formSubCfgGeneric(
       F, LI, DT, PDT, SAA, state, LocalSize, ReqdArrayElements,

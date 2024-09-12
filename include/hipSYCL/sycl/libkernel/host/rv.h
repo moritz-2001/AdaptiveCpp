@@ -22,6 +22,8 @@ template <typename T> T rv_insert(T, std::uint32_t, T);
 
 template <typename T> T rv_reduce(T, int);
 
+template <typename T> T rv_is_uniform(T);
+
 
 
 // ALL_INTEGRAL(CBS_EXTRACT)

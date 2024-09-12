@@ -625,7 +625,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_inclusive_scan_over_group(sub_group g, T x,
   const size_t lrange = g.get_local_linear_range();
   auto local_x = x;
 #pragma unroll
-  for (size_t i = 1; i < lrange; i *= 2) {
+  for (size_t i = 1ul; i < lrange; i *= 2) {
     auto other_x = __acpp_shift_group_right(g, local_x, i);
     if (i <= lid)
       local_x = binary_op(local_x, other_x);
@@ -639,8 +639,8 @@ HIPSYCL_KERNEL_TARGET T __acpp_inclusive_scan_over_group(sub_group g, T x,
   __acpp_group_barrier(g);
 
   if (g.leader()) {
-    for (int i = 1; i < g.get_local_range().size(); ++i)
-      scratch[i] = binary_op(scratch[i], scratch[i - 1]);
+    for (auto i = 1ul; i < g.get_local_range().size(); ++i)
+      scratch[i] = binary_op(scratch[i], scratch[i - 1ul]);
   }
 
   __acpp_group_barrier(g);
@@ -658,9 +658,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_inclusive_scan_over_group(group<Dim> g, T x,
   auto sg = g.get_sub_group();
   size_t sgId = sg.get_group_linear_id();
 
-
   x = __acpp_inclusive_scan_over_group(sg, x, binary_op);
-  __acpp_group_barrier(g);
 
   // Last work-item in sub-group
   if (sg.get_local_linear_id() + 1ul == sg.get_local_linear_range()) {
@@ -677,8 +675,9 @@ HIPSYCL_KERNEL_TARGET T __acpp_inclusive_scan_over_group(group<Dim> g, T x,
   __acpp_group_barrier(g);
 
   // Not the first sub-group
-  if (g.get_local_linear_id() >= sg.get_local_linear_range()) {
-    x = binary_op(scratch[g.get_local_linear_id() / sg.get_local_linear_range() - 1], x);
+  const auto glid = sg.get_group_linear_id();
+  if (glid >= 1) {
+    x = binary_op(scratch[glid-1], x);
   }
   __acpp_group_barrier(g);
   return x;

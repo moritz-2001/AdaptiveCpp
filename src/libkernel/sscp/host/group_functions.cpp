@@ -189,13 +189,14 @@ template <typename T> T work_reduce(__acpp_sscp_algorithm_op op, T x) {
 
   const auto lid = get_local_linear_id();
   const auto local_range = get_local_size();
+  const auto sgid = __acpp_sscp_get_subgroup_id();
 
   T result = sub_reduce(op, x);
 
   // Collect results from sub-groups
   if (__acpp_sscp_get_subgroup_local_id() == 0) {
     // Use sg-id
-    scratch[__acpp_sscp_get_subgroup_id()] = result;
+    scratch[sgid] = result;
   }
 
   __acpp_cbs_barrier(); // as this starts a new loop with CBS,
@@ -385,11 +386,7 @@ bool __acpp_sscp_sub_group_all(bool pred) {
 #if USE_RV
   return rv_all(pred);
 #else
-  auto v = static_cast<uint8_t>(pred);
-  __acpp_cbs_sub_barrier();
-  const auto t = __cbs_reduce(v, static_cast<int>(ReduceOp::MIN)) > 0;
-  __acpp_cbs_sub_barrier();
-  return t;
+  return sub_reduce(__acpp_sscp_algorithm_op::min, static_cast<uint8_t>(pred)) > 0;
 #endif
 }
 
@@ -439,9 +436,8 @@ template <typename T> T work_inclusive_scan(__acpp_sscp_algorithm_op op, T x) {
 
   __acpp_cbs_barrier();
 
-
   // Last work-item in sub-group
-  if (__acpp_sscp_get_subgroup_local_id() + 1 == __acpp_sscp_get_subgroup_size()) {
+  if (sgId + 1 == __acpp_sscp_get_subgroup_size()) {
     // sg group id
     scratch[sgId] = x;
   }

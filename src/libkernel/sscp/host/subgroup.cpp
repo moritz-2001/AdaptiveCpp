@@ -68,7 +68,13 @@ HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_id() {
                                (__acpp_sscp_get_local_size_x() +
                                 __acpp_sscp_get_local_id_z() * __acpp_sscp_get_local_size_x());
 
-  return local_tid / __acpp_sscp_get_subgroup_max_size();
+  const auto res = local_tid / __acpp_sscp_get_subgroup_max_size();
+
+  #if USE_RV
+    return rv_is_uniform(res);
+  #else
+    return res;
+  #endif
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_num_subgroups() {
