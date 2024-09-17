@@ -711,14 +711,10 @@ void SubCFG::replicate(
 
   removeDeadPhiBlocks(BlocksToRemap);
 
-  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
-    //  F.viewCFG();
-  }
-
   EntryBB_ = PreHeader_;
   ExitBB_ = Latches[0];
   HI.ContiguousIdx = Idx;
-  HI.SGIdArg = HI.Level == HierarchicalLevel::H_CBS_SUBGROUP ? WIIndVars_.back() : nullptr;
+  HI.SGIdArg = HI.Level == HierarchicalLevel::H_CBS_SUBGROUP ? WIIndVars_.back() : (HI.Level == HierarchicalLevel::CBS ? &*VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] : nullptr) ;
 }
 
 // remove incoming PHI blocks that no longer actually have an edge to the PHI
@@ -1334,7 +1330,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
     SubCfgsBlocks.insert(SubCfg.getNewBlocks().begin(), SubCfg.getNewBlocks().end());
   {
     llvm::SmallVector<llvm::AllocaInst *, 8> WL;
-    llvm::SmallVector<llvm::AllocaInst *, 8> WLNot;
+    llvm::SmallVector<llvm::AllocaInst *, 8> WLSubCfgInternal;
     for (auto &I : *EntryBlock) {
       if (auto *Alloca = llvm::dyn_cast<llvm::AllocaInst>(&I)) {
         if (Alloca->hasMetadata(MDKind::Arrayified))
@@ -1344,31 +1340,46 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
             }))
           continue;
 
-        auto shape = VecInfo.getVectorShape(*Alloca);
-        if (not USE_RV and !isAllocaSubCfgInternal(Alloca, SubCfgs, DT)) {
+        if (auto shape = VecInfo.getVectorShape(*Alloca); shape.isUniform()) {
+          continue;
+        }
+        if (not isAllocaSubCfgInternal(Alloca, SubCfgs, DT)) {
           WL.push_back(Alloca);
-        } else if (not shape.isUniform()) {
-          WL.push_back(Alloca);
-          //llvm::outs() << "ALLOCA: " << *Alloca << "\n";;
+        } else if constexpr (USE_RV) {
+           WLSubCfgInternal.push_back(Alloca);
         }
       }
     }
 
-    for (auto* Alloca : WLNot) {
-      auto* BB = llvm::dyn_cast<llvm::Instruction>(Alloca->uses().begin()->getUser())->getParent();
-      auto it = std::find_if(SubCfgs.begin(), SubCfgs.end(), [&](SubCFG& SubCfg) {
-        return std::any_of(SubCfg.getNewBlocks().begin(), SubCfg.getNewBlocks().end(), [BB](auto* BasicB) { return BasicB == BB; });
-      });
-      assert(it != SubCfgs.end());
-      auto& SubCfg = *it;
-      llvm::IRBuilder LoadBuilder{SubCfg.getLoadBB()->getFirstNonPHI()};
-      //llvm::outs() << "NAME: " << SubCfg.ge()->getName() << "\n";
-      auto ClonedAlloca = Alloca->clone();
-      LoadBuilder.Insert(ClonedAlloca);
-      Alloca->replaceAllUsesWith(ClonedAlloca);
-      Alloca->eraseFromParent();
-    }
 
+    for (auto *I : WLSubCfgInternal) {
+      llvm::IRBuilder AllocaBuilder{I};
+      llvm::Type *T = I->getAllocatedType();
+      if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(I->getArraySize())) {
+        auto ArrSize = ArrSizeC->getLimitedValue();
+        if (ArrSize > 1) {
+          T = llvm::ArrayType::get(T, ArrSize);
+          llvm::outs() << "Caution, alloca was array\n";
+        }
+      }
+
+      auto *Alloca = AllocaBuilder.CreateAlloca(T, AllocaBuilder.getInt64(SGSize), I->getName() + "_alloca");
+      Alloca->setAlignment(llvm::Align{DefaultAlignment});
+      Alloca->setMetadata(MDKind::Arrayified, MDAlloca);
+
+      for (auto &SubCfg : SubCfgs) {
+        auto *GepIp = SubCfg.getLoadBB()->getTerminator();
+        auto *ContiguousIdx = SubCfg.getHI().SGIdArg;
+
+        llvm::IRBuilder LoadBuilder{GepIp};
+        auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
+            Alloca->getAllocatedType(), Alloca, {ContiguousIdx}, I->getName() + "_gep"));
+        GEP->setMetadata(MDKind::Arrayified, MDAlloca);
+
+        llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
+      }
+      I->eraseFromParent();
+    }
 
     for (auto *I : WL) {
       llvm::IRBuilder AllocaBuilder{I};
@@ -1377,7 +1388,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
         auto ArrSize = ArrSizeC->getLimitedValue();
         if (ArrSize > 1) {
           T = llvm::ArrayType::get(T, ArrSize);
-          HIPSYCL_DEBUG_WARNING << "Caution, alloca was array\n";
+          llvm::outs() << "Caution, alloca was array\n";
         }
       }
 
@@ -1391,7 +1402,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
 
         llvm::IRBuilder LoadBuilder{GepIp};
         auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
-            Alloca->getAllocatedType(), Alloca, ContiguousIdx, I->getName() + "_gep"));
+            Alloca->getAllocatedType(), Alloca, {ContiguousIdx}, I->getName() + "_gep"));
         GEP->setMetadata(MDKind::Arrayified, MDAlloca);
 
         llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
@@ -1399,6 +1410,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
       I->eraseFromParent();
     }
   }
+
 
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     assert(mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)->getNumUses() == 0);
@@ -2253,8 +2265,6 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
   auto &LI = AM.getResult<llvm::LoopAnalysis>(F);
   assert(!llvm::verifyFunction(F, &llvm::outs()));
 
-  //F.viewCFG();
-
   State state{.Dim = getRangeDim(F),
               .SizeT = llvm::IntegerType::getInt64Ty(F.getContext())};
 
@@ -2300,9 +2310,7 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
       replaceUsesOfGVWith(F, cbs::SubGroupSharedMemory, SubgroupScratchMemoryAlloca);
     }
   }
-  //F.viewCFG();
-  //F.addFnAttr(llvm::Attribute::OptimizeNone);
-  //F.addFnAttr(llvm::Attribute::NoInline);
+  F.addFnAttr(llvm::Attribute::NoInline);
   assert(!llvm::verifyFunction(F, &llvm::outs()));
 
   llvm::PreservedAnalyses PA;

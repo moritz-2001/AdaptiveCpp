@@ -171,6 +171,7 @@ bool LLVMToHostTranslator::translateToBackendFormat(llvm::Module &FlavoredModule
       "-Wno-pass-failed",
       "-fPIC",
 #if USE_RV
+    "-fno-unroll-loops",
       "-fplugin=/usr/local/lib/RVPLUG.so",
       "-fpass-plugin=/usr/local/lib/RVPLUG.so",
 #endif
