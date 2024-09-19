@@ -1346,39 +1346,55 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
         if (not isAllocaSubCfgInternal(Alloca, SubCfgs, DT)) {
           WL.push_back(Alloca);
         } else if constexpr (USE_RV) {
-           WLSubCfgInternal.push_back(Alloca);
+          WLSubCfgInternal.push_back(Alloca);
         }
       }
     }
 
 
     for (auto *I : WLSubCfgInternal) {
-      llvm::IRBuilder AllocaBuilder{I};
-      llvm::Type *T = I->getAllocatedType();
-      if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(I->getArraySize())) {
-        auto ArrSize = ArrSizeC->getLimitedValue();
-        if (ArrSize > 1) {
-          T = llvm::ArrayType::get(T, ArrSize);
-          llvm::outs() << "Caution, alloca was array\n";
-        }
-      }
-
-      auto *Alloca = AllocaBuilder.CreateAlloca(T, AllocaBuilder.getInt64(SGSize), I->getName() + "_alloca");
-      Alloca->setAlignment(llvm::Align{DefaultAlignment});
-      Alloca->setMetadata(MDKind::Arrayified, MDAlloca);
-
       for (auto &SubCfg : SubCfgs) {
-        auto *GepIp = SubCfg.getLoadBB()->getTerminator();
-        auto *ContiguousIdx = SubCfg.getHI().SGIdArg;
-
-        llvm::IRBuilder LoadBuilder{GepIp};
-        auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
-            Alloca->getAllocatedType(), Alloca, {ContiguousIdx}, I->getName() + "_gep"));
-        GEP->setMetadata(MDKind::Arrayified, MDAlloca);
-
-        llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
+        llvm::IRBuilder AllocaBuilder{SubCfg.getLoadBB()->getFirstNonPHI()};
+        auto* AllocaClone = I->clone();
+        AllocaBuilder.Insert(AllocaClone);
+        llvm::replaceDominatedUsesWith(I, AllocaClone, DT, SubCfg.getLoadBB());
       }
       I->eraseFromParent();
+
+
+      // llvm::IRBuilder AllocaBuilder{I};
+      // llvm::Type *T = I->getAllocatedType();
+      // if (I->getAllocatedType()->isArrayTy()) {
+      //   continue;
+      // }
+      //
+      // if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(I->getArraySize())) {
+      //   auto ArrSize = ArrSizeC->getLimitedValue();
+      //   if (ArrSize > 1) {
+      //     T = llvm::ArrayType::get(T, ArrSize);
+      //     llvm::outs() << "Caution, alloca was array\n";
+      //   }
+      // }
+      //
+      // auto *Alloca = AllocaBuilder.CreateAlloca(T, AllocaBuilder.getInt64(SGSize), I->getName() + "_alloca");
+      // Alloca->setAlignment(llvm::Align{DefaultAlignment});
+      // Alloca->setMetadata(MDKind::Arrayified, MDAlloca);
+      //
+      // for (auto &SubCfg : SubCfgs) {
+      //   auto *GepIp = SubCfg.getLoadBB()->getTerminator();
+      //   auto *ContiguousIdx = SubCfg.getHI().SGIdArg;
+      //
+      //   llvm::IRBuilder LoadBuilder{GepIp};
+      //   auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
+      //       Alloca->getAllocatedType(), Alloca, {ContiguousIdx}, I->getName() + "_gep"));
+      //   GEP->setMetadata(MDKind::Arrayified, MDAlloca);
+      //
+      //   const auto num = llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
+      //   if (num > 0) {
+      //   //  llvm::outs() << "ALLOCA: " << *I << " New Alloca: " << *Alloca << " GEP: " << *GEP << " TYPE: " << *T << "\n";
+      //   }
+      // }
+      // I->eraseFromParent();
     }
 
     for (auto *I : WL) {
