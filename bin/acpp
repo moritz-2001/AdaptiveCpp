@@ -1454,8 +1454,6 @@ class omp_accelerated_invocation:
     flags += self._cxx_flags
 
     flags += ["-march=native"]
-    flags += ["-fno-unroll-loops"]
-
 
     return flags
 
