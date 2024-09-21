@@ -102,6 +102,37 @@ template <typename T> T sub_broadcast(const int sender, T x) {
 #endif
 }
 
+template <typename T> T sub_shift_left(T x, __acpp_uint32 delta) {
+#if USE_RV
+  return hipsycl::sycl::detail::shuffle_down_impl<T>(x, static_cast<int>(delta));
+#else
+#if USE_CBS_SHUFFLE
+  __acpp_cbs_sub_barrier();
+  const auto pos =
+      __acpp_sscp_get_subgroup_local_id() + delta >= __acpp_sscp_get_subgroup_max_size()
+          ? 0
+          : __acpp_sscp_get_subgroup_local_id() + delta;
+  auto tmp = __cbs_shuffle(x, pos);
+  __acpp_cbs_sub_barrier();
+  return tmp;
+#else
+  T *scratch = static_cast<T *>(sub_group_shared_memory);
+  auto lid = __acpp_sscp_get_subgroup_local_id();
+  auto target_lid = lid + delta;
+  scratch[lid] = x;
+  __acpp_cbs_sub_barrier();
+
+  // checking for both larger and smaller in case 'group<Dim>::linear_id_type' is not unsigned
+  if (target_lid >= hipsycl::compiler::SGSize)
+    target_lid = 0;
+
+  x = scratch[target_lid];
+  __acpp_cbs_sub_barrier();
+  return x;
+#endif
+#endif
+}
+
 constexpr ReduceOp reduce_op_map(__acpp_sscp_algorithm_op op) {
   switch (op) {
   case __acpp_sscp_algorithm_op::plus:
@@ -171,16 +202,38 @@ template <typename T, std::enable_if_t<not std::is_integral_v<T>, bool> = true> 
 
 template <typename T> T sub_reduce(__acpp_sscp_algorithm_op op, T x) {
   ReduceOp operation = reduce_op_map(op);
-  if (operation == ReduceOp::NOT_SUPPORTED) {
-    assert(false);
-  }
 #if USE_RV
-  return rv_reduce(x, static_cast<int>(operation));
+  if (operation != ReduceOp::NOT_SUPPORTED and USE_REDUCE_INTRINSIC) {
+    return rv_reduce(x, static_cast<int>(operation));
+  } else  {
+    auto local_x = x;
+    #pragma unroll
+    for (auto i = __acpp_sscp_get_subgroup_size() / 2; i > 0; i /= 2) {
+      auto other_x = sub_shift_left(local_x, i);
+      local_x = binary_op(op, local_x, other_x);
+    }
+    return sub_broadcast(0, local_x);
+  }
 #else
-  __acpp_cbs_sub_barrier();
-  const T t = __cbs_reduce(x, static_cast<int>(operation));
-  __acpp_cbs_sub_barrier();
-  return t;
+  if (operation != ReduceOp::NOT_SUPPORTED and USE_REDUCE_INTRINSIC) {
+    __acpp_cbs_sub_barrier();
+    const T t = __cbs_reduce(x, static_cast<int>(operation));
+    __acpp_cbs_sub_barrier();
+    return t;
+  } else {
+    T *scratch = static_cast<T *>(sub_group_shared_memory);
+    scratch[__acpp_sscp_get_subgroup_local_id()] = x;
+    __acpp_cbs_sub_barrier();
+    if (__acpp_sscp_get_subgroup_local_id() == 0) {
+      for (auto i = 1ul; i < __acpp_sscp_get_subgroup_size(); ++i) {
+        scratch[0] = binary_op(op, scratch[0], scratch[i]);
+      }
+    }
+    __acpp_cbs_sub_barrier();
+    const auto result = scratch[0];
+    __acpp_cbs_sub_barrier();
+    return result;
+  }
 #endif
 }
 
@@ -218,36 +271,6 @@ template <typename T> T work_reduce(__acpp_sscp_algorithm_op op, T x) {
   return endResult;
 }
 
-template <typename T> T sub_shift_left(T x, __acpp_uint32 delta) {
-#if USE_RV
-  return hipsycl::sycl::detail::shuffle_down_impl<T>(x, static_cast<int>(delta));
-#else
-#if USE_CBS_SHUFFLE
-  __acpp_cbs_sub_barrier();
-  const auto pos =
-      __acpp_sscp_get_subgroup_local_id() + delta >= __acpp_sscp_get_subgroup_max_size()
-          ? 0
-          : __acpp_sscp_get_subgroup_local_id() + delta;
-  auto tmp = __cbs_shuffle(x, pos);
-  __acpp_cbs_sub_barrier();
-  return tmp;
-#else
-  T *scratch = static_cast<T *>(sub_group_shared_memory);
-  auto lid = __acpp_sscp_get_subgroup_local_id();
-  auto target_lid = lid + delta;
-  scratch[lid] = x;
-  __acpp_cbs_sub_barrier();
-
-  // checking for both larger and smaller in case 'group<Dim>::linear_id_type' is not unsigned
-  if (target_lid >= hipsycl::compiler::SGSize)
-    target_lid = 0;
-
-  x = scratch[target_lid];
-  __acpp_cbs_sub_barrier();
-  return x;
-#endif
-#endif
-}
 
 template <typename T> T work_shift_left(T x, __acpp_uint32 delta) {
   T *scratch = static_cast<T *>(work_group_shared_memory);

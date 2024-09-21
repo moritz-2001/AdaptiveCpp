@@ -413,16 +413,14 @@ HIPSYCL_KERNEL_TARGET T __acpp_joint_reduce(Group g, Ptr first, Ptr last, T init
 
 
 template <typename BinaryOperation, typename T> constexpr int reduce_supported_op() {
-  if constexpr (std::is_integral_v<T> or std::is_same_v<T, size_t>) {
-    if constexpr (std::is_same_v<BinaryOperation, sycl::plus<T>>) {
-      return 0;
-    } else if constexpr (std::is_same_v<BinaryOperation, sycl::multiplies<T>>) {
-      return 1;
-    } else if constexpr (std::is_same_v<BinaryOperation, sycl::minimum<T>>) {
-      return 2;
-    } else if constexpr (std::is_same_v<BinaryOperation, sycl::maximum<T>>) {
-      return 3;
-    }
+  if constexpr (std::is_same_v<BinaryOperation, sycl::plus<T>>) {
+    return 0;
+  } else if constexpr (std::is_same_v<BinaryOperation, sycl::multiplies<T>>) {
+    return 1;
+  } else if constexpr (std::is_same_v<BinaryOperation, sycl::minimum<T>>) {
+    return 2;
+  } else if constexpr (std::is_same_v<BinaryOperation, sycl::maximum<T>>) {
+    return 3;
   }
   return -1;
 }
@@ -432,7 +430,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_reduce_over_group(sub_group g, T x, BinaryOperati
   static_assert(std::is_fundamental_v<T>);
   constexpr int op = reduce_supported_op<BinaryOperation, T>();
 #if USE_RV
-  if constexpr (op >= 0) {
+  if constexpr (op >= 0 and USE_REDUCE_INTRINSIC) {
     return rv_reduce(x, op);
   } else {
     auto local_x = x;
@@ -444,7 +442,7 @@ HIPSYCL_KERNEL_TARGET T __acpp_reduce_over_group(sub_group g, T x, BinaryOperati
     return __acpp_group_broadcast(g, local_x, 0);
   }
 #else
-  if constexpr (op >= 0) {
+  if constexpr (op >= 0 and USE_REDUCE_INTRINSIC) {
     __acpp_group_barrier(g);
     T tmp = __cbs_reduce(x, op);
     __acpp_group_barrier(g);
