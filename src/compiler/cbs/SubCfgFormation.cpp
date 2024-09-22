@@ -1317,6 +1317,31 @@ bool isAllocaSubCfgInternal(llvm::Value *Alloca, const std::vector<SubCFG> &SubC
   return true;
 }
 
+llvm::GetElementPtrInst * createGEP(llvm::AllocaInst *Alloca,
+                                       llvm::Instruction *Before,
+                                       bool AlignPadding, llvm::Value* ContIndex) {
+
+  std::vector<llvm::Value *> GEPArgs;
+  GEPArgs.push_back(ContIndex);
+
+  if (AlignPadding)
+    GEPArgs.push_back(
+        llvm::ConstantInt::get(llvm::Type::getInt32Ty(Alloca->getParent()->getContext()), 0));
+
+  llvm::IRBuilder<> Builder(Before);
+#if LLVM_MAJOR < 15
+  llvm::GetElementPtrInst *GEP = dyn_cast<llvm::GetElementPtrInst>(
+      Builder.CreateGEP(Alloca->getType()->getPointerElementType(),
+                        Alloca, GEPArgs));
+#else
+  llvm::GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Builder.CreateGEP(
+      Alloca->getAllocatedType(), Alloca, GEPArgs));
+#endif
+  assert(GEP != nullptr);
+
+  return GEP;
+}
+
 // Widens the allocas in the entry block to array allocas.
 // Replace uses of the original alloca with GEP that indexes the new alloca with
 // \a Idx.
@@ -1384,6 +1409,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
 
       unsigned Alignment = I->getAlign().value();
       uint64_t StoreSize = layout.getTypeStoreSize(ElementType);
+      bool PaddingAdded = false;
 
       if ((Alignment > 1) && (StoreSize & (Alignment - 1))) {
         uint64_t AlignedSize = (StoreSize & (~(Alignment - 1))) + Alignment;
@@ -1407,6 +1433,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
           PaddedStructElements.push_back(StructPadding);
           const llvm::ArrayRef<llvm::Type *> NewStructElements(PaddedStructElements);
           AllocType = llvm::StructType::get(F.getContext(), NewStructElements, true);
+          PaddingAdded = true;
           uint64_t NewStoreSize = layout.getTypeStoreSize(AllocType);
           assert(NewStoreSize == AlignedSize);
 
@@ -1422,6 +1449,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
           const llvm::ArrayRef<llvm::Type *> NewStructElements(PaddedStructElements);
           AllocType = llvm::StructType::get(OldStruct->getContext(), NewStructElements,
                                             OldStruct->isPacked());
+          PaddingAdded = true;
           uint64_t NewStoreSize = layout.getTypeStoreSize(AllocType);
           assert(NewStoreSize == AlignedSize);
         }
@@ -1436,8 +1464,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
         auto *ContiguousIdx = SubCfg.getHI().getContiguousIdx();
 
         llvm::IRBuilder LoadBuilder{GepIp};
-        auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
-            Alloca->getAllocatedType(), Alloca, {ContiguousIdx}, I->getName() + "_gep"));
+        auto* GEP = createGEP(Alloca, GepIp, PaddingAdded, ContiguousIdx);
         GEP->setMetadata(MDKind::Arrayified, MDAlloca);
 
         llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
