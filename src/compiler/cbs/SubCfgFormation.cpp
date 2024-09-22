@@ -80,6 +80,24 @@ llvm::Instruction *getLoadForGlobalVariable(llvm::Function &F, llvm::StringRef V
   return Builder.CreateLoad(SizeT, GV);
 }
 
+void replaceUsesOfGVWith(llvm::Function &F, llvm::StringRef GlobalVarName, llvm::Value *To) {
+  auto M = F.getParent();
+  auto GV = M->getGlobalVariable(GlobalVarName);
+  if (!GV)
+    return;
+
+  HIPSYCL_DEBUG_INFO << "[SSCP][HostKernelWrapper] RUOGVW: " << *GV << " with " << *To << "\n";
+  llvm::SmallVector<llvm::Instruction *> ToErase;
+  for (auto U : GV->users()) {
+    if (auto I = llvm::dyn_cast<llvm::LoadInst>(U); I && I->getFunction() == &F) {
+      HIPSYCL_DEBUG_INFO << "[SSCP][HostKernelWrapper] RUOGVW: " << *I << " with " << *To << "\n";
+      I->replaceAllUsesWith(To);
+    }
+  }
+  for (auto I : ToErase)
+    I->eraseFromParent();
+}
+
 llvm::LoadInst *mergeGVLoadsInEntry(llvm::Function &F, llvm::StringRef VarName) {
   auto SizeT = F.getParent()->getDataLayout().getLargestLegalIntType(F.getContext());
   auto *GV = F.getParent()->getOrInsertGlobal(VarName, SizeT);
@@ -1427,6 +1445,28 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
     formSubCfgs(F, LI, DT, PDT, *SAA, IsSscp_);
   else
     createLoopsAroundKernel(F, DT, LI, PDT, IsSscp_);
+
+  // SSCP shared memory
+  {
+    llvm::IRBuilder Builder{F.getContext()};
+    Builder.SetInsertPoint(F.getEntryBlock().getTerminator());
+    {
+      auto* WorkgroupScratchMemoryAlloca = Builder.CreateAlloca(llvm::IntegerType::getInt8Ty(F.getContext()),
+                                               Builder.getIntN(64, 1024 * 1024));
+      WorkgroupScratchMemoryAlloca->setAlignment(llvm::Align(128));
+      replaceUsesOfGVWith(F, "work_group_shared_memory",
+                          WorkgroupScratchMemoryAlloca);
+    }
+  }
+
+  if (IsSscp_) {
+    llvm::IRBuilder Builder{F.getContext()};
+    const std::size_t Dim = getRangeDim(F);
+    for (auto i = Dim; i < 3; ++i) {
+      replaceUsesOfGVWith(F, LocalSizeGlobalNames[i], Builder.getIntN(64, 1));
+      replaceUsesOfGVWith(F, LocalIdGlobalNames[i], Builder.getIntN(64, 0));
+    }
+  }
 
   llvm::PreservedAnalyses PA;
   PA.preserve<SplitterAnnotationAnalysis>();
