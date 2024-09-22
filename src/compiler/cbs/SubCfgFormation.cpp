@@ -390,6 +390,10 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
       assert(D == InnerMost);
       auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
                                              "exit.cont_cond." + Suffix);
+      auto* Condition2 = Builder.CreateURem(HI.OuterLocalSize.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
+      Condition2 = Builder.CreateICmpEQ(Condition2, llvm::ConstantInt::get(IndVars.back()->getType(), 0));
+      ContCond = Builder.CreateLogicalOr(Condition2, ContCond);
+
       LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
     }
 #endif
@@ -2195,9 +2199,6 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
     }
   }
 
-  /* TODO
-   * 1. Incomplete sub-groups (masked load and stores?) or conditional uniform branch
-   */
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     assert(!llvm::verifyFunction(F, &llvm::errs()));
     ReduceIntrinsic{}.vectorizeAllInstances(F, SubCFGs, &InstContReplicaMap);
@@ -2251,6 +2252,81 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
   assert(!llvm::verifyFunction(F, &llvm::errs()) && "Function verification failed");
 }
 
+void multiplyFunction(llvm::Function &F, State state) {
+  auto& M = *F.getParent();
+  auto& Context = M.getContext();
+  std::string NewFunctionName = std::string{F.getName()}+"_multiply";
+  auto* NewF = llvm::Function::Create(F.getFunctionType(), F.getLinkage(), F.getAddressSpace(), NewFunctionName, &M);
+  NewF->setAttributes( F.getAttributes());
+
+  assert(NewF->getParent());
+
+  auto* entryBB = llvm::BasicBlock::Create(Context, "entry", NewF);
+  auto* noIncompleteSgBB = llvm::BasicBlock::Create(Context, "then", NewF);
+  auto* elseBB = llvm::BasicBlock::Create(Context, "else", NewF);
+  auto* endBB = llvm::BasicBlock::Create(Context, "end", NewF);
+
+  llvm::IRBuilder<> Builder{entryBB};
+  auto* earlyRet = Builder.CreateRetVoid();
+
+  llvm::Value* LocalSize = getLoadForGlobalVariable(*NewF, state.LocalSizeGlobalNames[0]);
+  for (auto i = 1; i < state.Dim; ++i) {
+    LocalSize = Builder.CreateMul(LocalSize, getLoadForGlobalVariable(*NewF, state.LocalSizeGlobalNames[i]));
+  }
+  llvm::Value* Cond =  Builder.CreateURem(LocalSize, Builder.getInt64(SGSize));
+  Builder.CreateCondBr( Builder.CreateICmpEQ(Cond, Builder.getInt64(0)), noIncompleteSgBB, elseBB);
+
+  Builder.SetInsertPoint(elseBB);
+  Builder.CreateBr(endBB);
+
+  Builder.SetInsertPoint(noIncompleteSgBB);
+  Builder.CreateBr(endBB);
+
+  Builder.SetInsertPoint(endBB);
+  Builder.CreateRetVoid();
+
+  earlyRet->eraseFromParent();
+
+  llvm::SmallVector<llvm::Value*, 8> Args{};
+  for (auto& Arg: NewF->args()) {
+    Args.emplace_back(&Arg);
+  }
+
+  Builder.SetInsertPoint(noIncompleteSgBB->getFirstNonPHI());
+  auto* CallComplete = Builder.CreateCall(F.getFunctionType(), &F, Args);
+  assert(!llvm::verifyFunction(*NewF, &llvm::outs()));
+  utils::checkedInlineFunction(CallComplete, "", true);
+
+  Builder.SetInsertPoint(elseBB->getFirstNonPHI());
+  auto* CallInComplete = Builder.CreateCall(F.getFunctionType(), &F, Args);
+  assert(!llvm::verifyFunction(*NewF, &llvm::outs()));
+  utils::checkedInlineFunction(CallInComplete, "", true);
+
+
+  auto* newEntry = llvm::BasicBlock::Create(F.getContext(), "Newentry", &F);
+  llvm::IRBuilder<> B{newEntry};
+  B.CreateRetVoid();
+
+  auto* origTerm = F.getEntryBlock().getTerminator();
+  B.SetInsertPoint(origTerm);
+  B.CreateBr(newEntry);
+  origTerm->eraseFromParent();
+
+  assert(!llvm::verifyFunction(F, &llvm::outs()));
+  {
+    llvm::SmallVector<llvm::Value*, 8> Args{};
+    for (auto& Arg: F.args()) {
+      Args.emplace_back(&Arg);
+    }
+    B.SetInsertPoint(newEntry->getFirstNonPHI());
+    auto* CallNewF = B.CreateCall(NewF->getFunctionType(), NewF, Args);
+    assert(!llvm::verifyFunction(F, &llvm::outs()));
+    utils::checkedInlineFunction(CallNewF, "", true);
+  }
+
+  NewF->eraseFromParent();
+}
+
 } // namespace
 
 namespace hipsycl::compiler {
@@ -2294,6 +2370,7 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
   auto &DT = AM.getResult<llvm::DominatorTreeAnalysis>(F);
   auto &PDT = AM.getResult<llvm::PostDominatorTreeAnalysis>(F);
   auto &LI = AM.getResult<llvm::LoopAnalysis>(F);
+
   assert(!llvm::verifyFunction(F, &llvm::outs()));
 
   State state{.Dim = getRangeDim(F),
@@ -2306,6 +2383,10 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
   }
 
   formSubCfgs(F, LI, DT, PDT, *SAA, state);
+
+  if constexpr (not USE_RV) {
+    multiplyFunction(F, state);
+  }
 
   if (not IsSscp_) {
     // If we do not use SSCP, then we need to replace localSizes
