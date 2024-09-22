@@ -1329,14 +1329,10 @@ llvm::GetElementPtrInst * createGEP(llvm::AllocaInst *Alloca,
         llvm::ConstantInt::get(llvm::Type::getInt32Ty(Alloca->getParent()->getContext()), 0));
 
   llvm::IRBuilder<> Builder(Before);
-#if LLVM_MAJOR < 15
-  llvm::GetElementPtrInst *GEP = dyn_cast<llvm::GetElementPtrInst>(
-      Builder.CreateGEP(Alloca->getType()->getPointerElementType(),
-                        Alloca, GEPArgs));
-#else
-  llvm::GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(Builder.CreateGEP(
+
+  llvm::GetElementPtrInst *GEP = dyn_cast<llvm::GetElementPtrInst>(Builder.CreateGEP(
       Alloca->getAllocatedType(), Alloca, GEPArgs));
-#endif
+
   assert(GEP != nullptr);
 
   return GEP;
