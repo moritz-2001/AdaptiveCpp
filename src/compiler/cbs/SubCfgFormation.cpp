@@ -1360,55 +1360,70 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
         llvm::replaceDominatedUsesWith(I, AllocaClone, DT, SubCfg.getLoadBB());
       }
       I->eraseFromParent();
-
-
-      // llvm::IRBuilder AllocaBuilder{I};
-      // llvm::Type *T = I->getAllocatedType();
-      // if (I->getAllocatedType()->isArrayTy()) {
-      //   continue;
-      // }
-      //
-      // if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(I->getArraySize())) {
-      //   auto ArrSize = ArrSizeC->getLimitedValue();
-      //   if (ArrSize > 1) {
-      //     T = llvm::ArrayType::get(T, ArrSize);
-      //     llvm::outs() << "Caution, alloca was array\n";
-      //   }
-      // }
-      //
-      // auto *Alloca = AllocaBuilder.CreateAlloca(T, AllocaBuilder.getInt64(SGSize), I->getName() + "_alloca");
-      // Alloca->setAlignment(llvm::Align{DefaultAlignment});
-      // Alloca->setMetadata(MDKind::Arrayified, MDAlloca);
-      //
-      // for (auto &SubCfg : SubCfgs) {
-      //   auto *GepIp = SubCfg.getLoadBB()->getTerminator();
-      //   auto *ContiguousIdx = SubCfg.getHI().SGIdArg;
-      //
-      //   llvm::IRBuilder LoadBuilder{GepIp};
-      //   auto *GEP = llvm::cast<llvm::GetElementPtrInst>(LoadBuilder.CreateInBoundsGEP(
-      //       Alloca->getAllocatedType(), Alloca, {ContiguousIdx}, I->getName() + "_gep"));
-      //   GEP->setMetadata(MDKind::Arrayified, MDAlloca);
-      //
-      //   const auto num = llvm::replaceDominatedUsesWith(I, GEP, DT, SubCfg.getLoadBB());
-      //   if (num > 0) {
-      //   //  llvm::outs() << "ALLOCA: " << *I << " New Alloca: " << *Alloca << " GEP: " << *GEP << " TYPE: " << *T << "\n";
-      //   }
-      // }
-      // I->eraseFromParent();
     }
 
     for (auto *I : WL) {
       llvm::IRBuilder AllocaBuilder{I};
-      llvm::Type *T = I->getAllocatedType();
+      llvm::Type *AllocType = I->getAllocatedType();
       if (auto *ArrSizeC = llvm::dyn_cast<llvm::ConstantInt>(I->getArraySize())) {
         auto ArrSize = ArrSizeC->getLimitedValue();
         if (ArrSize > 1) {
-          T = llvm::ArrayType::get(T, ArrSize);
+          AllocType = llvm::ArrayType::get(AllocType, ArrSize);
           llvm::outs() << "Caution, alloca was array\n";
         }
       }
 
-      auto *Alloca = AllocaBuilder.CreateAlloca(T, ReqdArrayElements, I->getName() + "_alloca");
+      // Moved in from POCL
+
+      auto *ElementType = I->getAllocatedType();
+      auto &layout = F.getParent()->getDataLayout();
+
+      unsigned Alignment = I->getAlign().value();
+      uint64_t StoreSize = layout.getTypeStoreSize(ElementType);
+
+      if ((Alignment > 1) && (StoreSize & (Alignment - 1))) {
+        uint64_t AlignedSize = (StoreSize & (~(Alignment - 1))) + Alignment;
+
+        assert(AlignedSize > StoreSize);
+        uint64_t RequiredExtraBytes = AlignedSize - StoreSize;
+
+        // n-dim context array: In case the elementType itself is an array or
+        // a struct, we must take into account it could be alloca-ed with
+        // alignment and loads or stores might use vectorized instructions
+        // expecting proper alignment.
+        // Because of that, we cannot simply allocate vectorWidth*(size), but must
+        // pad the inner row to ensure the alignment to the next element.
+        if (llvm::isa<llvm::ArrayType>(ElementType)) {
+
+          llvm::ArrayType *StructPadding =
+              llvm::ArrayType::get(llvm::Type::getInt8Ty(F.getContext()), RequiredExtraBytes);
+
+          std::vector<llvm::Type *> PaddedStructElements;
+          PaddedStructElements.push_back(ElementType);
+          PaddedStructElements.push_back(StructPadding);
+          const llvm::ArrayRef<llvm::Type *> NewStructElements(PaddedStructElements);
+          AllocType = llvm::StructType::get(F.getContext(), NewStructElements, true);
+          uint64_t NewStoreSize = layout.getTypeStoreSize(AllocType);
+          assert(NewStoreSize == AlignedSize);
+
+        } else if (isa<llvm::StructType>(ElementType)) {
+          llvm::StructType *OldStruct = dyn_cast<llvm::StructType>(ElementType);
+
+          llvm::ArrayType *StructPadding =
+              llvm::ArrayType::get(llvm::Type::getInt8Ty(F.getContext()), RequiredExtraBytes);
+          std::vector<llvm::Type *> PaddedStructElements;
+          for (unsigned j = 0; j < OldStruct->getNumElements(); j++)
+            PaddedStructElements.push_back(OldStruct->getElementType(j));
+          PaddedStructElements.push_back(StructPadding);
+          const llvm::ArrayRef<llvm::Type *> NewStructElements(PaddedStructElements);
+          AllocType = llvm::StructType::get(OldStruct->getContext(), NewStructElements,
+                                            OldStruct->isPacked());
+          uint64_t NewStoreSize = layout.getTypeStoreSize(AllocType);
+          assert(NewStoreSize == AlignedSize);
+        }
+      }
+
+      auto *Alloca = AllocaBuilder.CreateAlloca(AllocType, ReqdArrayElements, I->getName() + "_alloca");
       Alloca->setAlignment(llvm::Align{DefaultAlignment});
       Alloca->setMetadata(MDKind::Arrayified, MDAlloca);
 
