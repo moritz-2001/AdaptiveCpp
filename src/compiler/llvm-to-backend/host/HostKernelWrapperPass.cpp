@@ -204,13 +204,14 @@ llvm::PreservedAnalyses HostKernelWrapperPass::run(llvm::Function &F,
   if (!SAA || !SAA->isKernelFunc(&F))
     return llvm::PreservedAnalyses::all();
 
-  // if (KnownGroupSizeX and KnownGroupSizeY and KnownGroupSizeZ) {
-  //   llvm::IRBuilder<> Bld(&F.getEntryBlock());
-  //   const std::array arr{KnownGroupSizeX, KnownGroupSizeY, KnownGroupSizeZ};
-  //   for (auto i = 0ul; i < 3; ++i) {
-  //     replaceUsesOfGVWith(F, cbs::LocalSizeGlobalNames[i], Bld.getInt64(arr[i]));
-  //   }
-  // }
+  if (KnownGroupSizeX and KnownGroupSizeY and KnownGroupSizeZ) {
+    llvm::outs() << "SIZES: " << KnownGroupSizeX << ", " << KnownGroupSizeY << ", " << KnownGroupSizeZ << "\n";
+    llvm::IRBuilder<> Bld(&F.getEntryBlock());
+    const std::array arr{KnownGroupSizeX, KnownGroupSizeY, KnownGroupSizeZ};
+    for (auto i = 0ul; i < 3; ++i) {
+      replaceUsesOfGVWith(F, cbs::LocalSizeGlobalNames[i], Bld.getInt64(arr[i]));
+    }
+  }
 
   auto Wrapper = makeWrapperFunction(F, DynamicLocalMemSize);
 
