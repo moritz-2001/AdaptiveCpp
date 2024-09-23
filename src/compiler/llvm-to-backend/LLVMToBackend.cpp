@@ -51,6 +51,7 @@
 #include <llvm/Support/Error.h>
 #include <llvm/Bitcode/BitcodeWriter.h>
 #include <string>
+#include "hipSYCL/RV.h"
 
 namespace hipsycl {
 namespace compiler {
@@ -295,6 +296,19 @@ bool LLVMToBackendTranslator::translatePreparedIR(llvm::Module &FlavoredModule, 
   return this->translateToBackendFormat(FlavoredModule, out);
 }
 
+class PrintPass : public llvm::PassInfoMixin<PrintPass> {
+public:
+  PrintPass() {}
+
+  static llvm::StringRef name() { return "rv::PrintPass"; }
+  llvm::PreservedAnalyses run(llvm::Function &F, llvm::FunctionAnalysisManager &) {
+    if (F.hasFnAttribute("iskernel")) {
+      F.viewCFG();
+    }
+    return llvm::PreservedAnalyses::all();
+  }
+};
+
 bool LLVMToBackendTranslator::optimizeFlavoredIR(llvm::Module& M, PassHandler& PH) {
   assert(PH.PassBuilder);
   assert(PH.ModuleAnalysisManager);
@@ -310,9 +324,21 @@ bool LLVMToBackendTranslator::optimizeFlavoredIR(llvm::Module& M, PassHandler& P
         }
       });
 
+  llvm::outs() << "optimizeFlavoiredIr\n";
+
+
+#if USE_RV
+  // If we use RV, then we can not optimize to much
+  // E.g., no loop unrolling and no vectorization
+  // (even with O3 vectorization should not happen because LLVM does not know the intrinsics)
   llvm::ModulePassManager MPM =
-      PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+      PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
   MPM.run(M, *PH.ModuleAnalysisManager);
+#else
+  llvm::ModulePassManager MPM =
+        PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+  MPM.run(M, *PH.ModuleAnalysisManager);
+#endif
 
   return true;
 }
