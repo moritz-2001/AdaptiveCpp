@@ -51,6 +51,7 @@
 #include <llvm/Support/MemoryBuffer.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Passes/PassBuilder.h>
+#include "hipSYCL/RV.h"
 
 namespace hipsycl {
 namespace compiler {
@@ -108,7 +109,15 @@ inline void constructPassBuilderAndMAM(F&& handler) {
   llvm::FunctionAnalysisManager FAM;
   llvm::CGSCCAnalysisManager CGAM;
   llvm::ModuleAnalysisManager MAM;
-  llvm::PassBuilder PB;
+  llvm::PipelineTuningOptions TuningOptions{};
+#if USE_RV
+  TuningOptions.LoopUnrolling = false;
+  TuningOptions.LoopInterleaving = false;
+  TuningOptions.LoopVectorization = false;
+  TuningOptions.SLPVectorization = false;
+#endif
+
+  llvm::PassBuilder PB{nullptr, TuningOptions};
   PB.registerModuleAnalyses(MAM);
   PB.registerCGSCCAnalyses(CGAM);
   PB.registerFunctionAnalyses(FAM);
