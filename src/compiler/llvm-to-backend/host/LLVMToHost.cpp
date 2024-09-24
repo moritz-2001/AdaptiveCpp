@@ -117,7 +117,7 @@ bool LLVMToHostTranslator::toBackendFlavor(llvm::Module &M, PassHandler &PH) {
   registerCBSPipeline(MPM, hipsycl::compiler::OptLevel::O3, true);
 
   llvm::FunctionPassManager FPM;
-  FPM.addPass(HostKernelWrapperPass{KnownLocalMemSize});
+  FPM.addPass(HostKernelWrapperPass{KnownLocalMemSize, KnownGroupSizeX, KnownGroupSizeY, KnownGroupSizeZ});
   MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
 
   MPM.run(M, *PH.ModuleAnalysisManager);
