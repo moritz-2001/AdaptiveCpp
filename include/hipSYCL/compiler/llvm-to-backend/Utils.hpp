@@ -110,11 +110,11 @@ inline void constructPassBuilderAndMAM(F&& handler) {
   llvm::CGSCCAnalysisManager CGAM;
   llvm::ModuleAnalysisManager MAM;
   llvm::PipelineTuningOptions TuningOptions{};
+  // If we use RV, then we can not optimize to much
+  // E.g., no loop unrolling or interleaving
+  // (Do not change the numer of iterations of the loop)
 #if USE_RV
   TuningOptions.LoopUnrolling = false;
-  TuningOptions.LoopInterleaving = false;
-  TuningOptions.LoopVectorization = false;
-  TuningOptions.SLPVectorization = false;
 #endif
 
   llvm::PassBuilder PB{nullptr, TuningOptions};

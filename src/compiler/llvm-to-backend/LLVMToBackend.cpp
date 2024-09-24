@@ -326,20 +326,9 @@ bool LLVMToBackendTranslator::optimizeFlavoredIR(llvm::Module& M, PassHandler& P
 
   llvm::outs() << "optimizeFlavoiredIr\n";
 
-
-#if USE_RV
-  // If we use RV, then we can not optimize to much
-  // E.g., no loop unrolling and no vectorization
-  // (even with O3 vectorization should not happen because LLVM does not know the intrinsics)
-  llvm::ModulePassManager MPM =
-      PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
-  MPM.run(M, *PH.ModuleAnalysisManager);
-#else
   llvm::ModulePassManager MPM =
         PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
   MPM.run(M, *PH.ModuleAnalysisManager);
-#endif
-
   return true;
 }
 
