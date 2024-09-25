@@ -326,8 +326,13 @@ bool LLVMToBackendTranslator::optimizeFlavoredIR(llvm::Module& M, PassHandler& P
 
   llvm::outs() << "optimizeFlavoiredIr\n";
 
+#if USE_RV
   llvm::ModulePassManager MPM =
-        PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+        PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O1);
+#else
+  llvm::ModulePassManager MPM =
+          PH.PassBuilder->buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+#endif
   MPM.run(M, *PH.ModuleAnalysisManager);
   return true;
 }
