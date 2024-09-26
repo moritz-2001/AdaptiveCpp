@@ -390,9 +390,8 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
       assert(D == InnerMost);
       auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
                                              "exit.cont_cond." + Suffix);
-      auto* Condition2 = Builder.CreateURem(HI.OuterLocalSize.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
-      Condition2 = Builder.CreateICmpEQ(Condition2, llvm::ConstantInt::get(IndVars.back()->getType(), 0));
-      ContCond = Builder.CreateLogicalOr(Condition2, ContCond);
+      auto* noIncompleteSgs = mergeGVLoadsInEntry(F, "no-incomplete-sgs", ContCond->getType());
+      ContCond = Builder.CreateLogicalOr(noIncompleteSgs, ContCond);
 
       LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
     }
@@ -2292,12 +2291,8 @@ void multiplyFunction(llvm::Function &F, State state) {
   llvm::IRBuilder<> Builder{entryBB};
   auto* earlyRet = Builder.CreateRetVoid();
 
-  llvm::Value* LocalSize = getLoadForGlobalVariable(*NewF, state.LocalSizeGlobalNames[0]);
-  for (auto i = 1; i < state.Dim; ++i) {
-    LocalSize = Builder.CreateMul(LocalSize, getLoadForGlobalVariable(*NewF, state.LocalSizeGlobalNames[i]));
-  }
-  llvm::Value* Cond =  Builder.CreateURem(LocalSize, Builder.getInt64(SGSize));
-  Builder.CreateCondBr( Builder.CreateICmpEQ(Cond, Builder.getInt64(0)), noIncompleteSgBB, elseBB);
+
+  Builder.CreateCondBr( mergeGVLoadsInEntry(*NewF, "no-incomplete-sgs", Builder.getInt1Ty()), noIncompleteSgBB, elseBB);
 
   Builder.SetInsertPoint(elseBB);
   Builder.CreateBr(endBB);
@@ -2348,6 +2343,17 @@ void multiplyFunction(llvm::Function &F, State state) {
   }
 
   NewF->eraseFromParent();
+
+  {
+    llvm::IRBuilder<> Builder{F.getEntryBlock().getFirstNonPHI()};
+    llvm::Value* LocalSize = getLoadForGlobalVariable(F, state.LocalSizeGlobalNames[0]);
+    for (auto i = 1; i < state.Dim; ++i) {
+      LocalSize = Builder.CreateMul(LocalSize, getLoadForGlobalVariable(F, state.LocalSizeGlobalNames[i]));
+    }
+    llvm::Value* Cond =  Builder.CreateURem(LocalSize, Builder.getInt64(SGSize));
+    auto* CondNoIncompleteSgs = Builder.CreateICmpEQ(Cond, Builder.getInt64(0));
+    replaceUsesOfGVWith(F, "no-incomplete-sgs", CondNoIncompleteSgs);
+  }
 }
 
 } // namespace
@@ -2427,6 +2433,12 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
     replaceUsesOfGVWith(F, state.LocalSizeGlobalNames[i], Builder.getIntN(64, 1));
     replaceUsesOfGVWith(F, state.LocalIdGlobalNames[i], Builder.getIntN(64, 0));
   }
+
+  for (auto i = 0; i < 3; ++i) {
+    mergeGVLoadsInEntry(F, state.LocalSizeGlobalNames[i]);
+  }
+
+
 
   // SSCP shared memory
   {
