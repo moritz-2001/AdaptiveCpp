@@ -47,6 +47,10 @@ size_t get_local_linear_id() {
   return lsize_x * lsize_y * lid_z + lsize_x * lid_y + lid_x;
 }
 
+bool isLeader() {
+	return __acpp_sscp_get_subgroup_local_id() == 0 and __acpp_sscp_get_subgroup_id() == 0;
+}
+
 size_t get_local_size() {
   size_t size_x = __acpp_cbs_local_size_x;
   size_t size_y = __acpp_cbs_local_size_y;
@@ -256,7 +260,7 @@ template <typename T> T work_reduce(__acpp_sscp_algorithm_op op, T x) {
   // LLVM detects it's actually just one iteration and optimizes it
 
   // First work-item does reduction on the results of the sub-group reductions
-  if (lid == 0) {
+  if (isLeader()) {
     T y = scratch[0];
     for (uint32_t j = 1u; j < __acpp_sscp_get_num_subgroups(); j += 1) {
       y = binary_op(op, y, scratch[j]);
@@ -463,7 +467,7 @@ template <typename T> T work_inclusive_scan(__acpp_sscp_algorithm_op op, T x) {
     scratch[sgId] = x;
   }
   __acpp_cbs_barrier();
-  if (get_local_linear_id() == 0) {
+  if (isLeader()) {
     for (auto i = 1ul; i < __acpp_sscp_get_num_subgroups(); ++i) {
       scratch[i] = binary_op(op, scratch[i - 1], scratch[i]);
     }
