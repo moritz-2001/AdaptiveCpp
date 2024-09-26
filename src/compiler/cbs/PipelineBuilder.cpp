@@ -118,6 +118,12 @@ void registerCBSPipeline(llvm::ModulePassManager &MPM, OptLevel Opt, bool IsSscp
     FPM.addPass(LoopsParallelMarkerPass{});
   
   MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
+  MPM.addPass(llvm::IPSCCPPass{});
+   {
+     llvm::FunctionPassManager FPM;
+     FPM.addPass(llvm::InstCombinePass{});
+     MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
+   }
 }
 
 } // namespace hipsycl::compiler
