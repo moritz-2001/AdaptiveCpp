@@ -50,6 +50,7 @@
 #include <llvm/IR/Type.h>
 #include <llvm/Support/Casting.h>
 #include <llvm/Transforms/Utils/Cloning.h>
+#include "hipSYCL/RV.h"
 
 namespace hipsycl {
 namespace compiler {
@@ -208,9 +209,11 @@ llvm::PreservedAnalyses HostKernelWrapperPass::run(llvm::Function &F,
     llvm::outs() << "SIZES: " << KnownGroupSizeX << ", " << KnownGroupSizeY << ", " << KnownGroupSizeZ << "\n";
     llvm::IRBuilder<> Bld(&F.getEntryBlock());
     const std::array arr{KnownGroupSizeX, KnownGroupSizeY, KnownGroupSizeZ};
+#if WG_SSCP_OPT
     for (auto i = 0ul; i < 3; ++i) {
       replaceUsesOfGVWith(F, cbs::LocalSizeGlobalNames[i], Bld.getInt64(arr[i]));
     }
+#endif
   }
 
   auto Wrapper = makeWrapperFunction(F, DynamicLocalMemSize);
