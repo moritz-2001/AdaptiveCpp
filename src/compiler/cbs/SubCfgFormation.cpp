@@ -390,8 +390,10 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
       assert(D == InnerMost);
       auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
                                              "exit.cont_cond." + Suffix);
+#if INCOMPLETE_SGS_OPT
       auto* noIncompleteSgs = mergeGVLoadsInEntry(F, "no-incomplete-sgs", ContCond->getType());
       ContCond = Builder.CreateLogicalOr(noIncompleteSgs, ContCond);
+#endif
 
       LoopCond = Builder.CreateLogicalAnd(ContCond, LoopCond);
     }
@@ -2413,7 +2415,7 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
 
   formSubCfgs(F, LI, DT, PDT, *SAA, state);
 
-  if constexpr (not USE_RV) {
+  if constexpr (not USE_RV and INCOMPLETE_SGS_OPT) {
     multiplyFunction(F, state);
   }
 
