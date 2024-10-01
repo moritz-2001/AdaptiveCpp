@@ -162,7 +162,7 @@ HIPSYCL_KERNEL_TARGET
 
   HIPSYCL_KERNEL_TARGET
   bool leader() const {
-    return get_local_linear_id() == 0;
+    return get_sub_group().leader() and get_sub_group().get_group_linear_id() == 0;
   }
 
   HIPSYCL_KERNEL_TARGET
