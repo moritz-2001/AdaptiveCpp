@@ -12,11 +12,37 @@ namespace sycl {
 
 namespace detail {
 
+template<class To, class From>
+std::enable_if_t<
+    sizeof(To) == sizeof(From) &&
+    std::is_trivially_copyable_v<From> &&
+    std::is_trivially_copyable_v<To>,
+    To>
+// constexpr support needs compiler magic
+bit_cast(const From& src) noexcept
+{
+  static_assert(std::is_trivially_constructible_v<To>,
+      "This implementation additionally requires "
+      "destination type to be trivially constructible");
+
+  To dst;
+  std::memcpy(&dst, &src, sizeof(To));
+  return dst;
+}
+
 
 template <typename T, typename RvOperation>
 T apply_on_data(T x, const RvOperation& op) {
   if constexpr (std::is_fundamental<T>::value) {
     return op(x);
+  } else if constexpr (sizeof(T) == 8) {
+    return bit_cast<T>(op(bit_cast<uint64_t>(x)));
+  } else if constexpr (sizeof(T) == 4) {
+    return bit_cast<T>(op(bit_cast<uint32_t>(x)));
+  } else if constexpr (sizeof(T) == 2) {
+    return bit_cast<T>(op(bit_cast<uint16_t>(x)));
+  } else if constexpr (sizeof(T) == 1) {
+    return bit_cast<T>(op(bit_cast<uint8_t>(x)));
   } else {
     constexpr std::size_t number_of_floats = (sizeof(T) + sizeof(float) - 1) / sizeof(float);
     std::array<float, number_of_floats> words{};
