@@ -748,7 +748,7 @@ void SubCFG::removeDeadPhiBlocks(llvm::SmallVector<llvm::BasicBlock *, 8> &Block
 
 // check if a contiguous value can be tracked back to only uniform values and the wi-loop indvar
 // currently cannot track back the value through PHI nodes.
-bool dontArrayifyContiguousValues(
+bool dontArrayifyValues(
     llvm::Instruction &I,
     llvm::DenseMap<llvm::Instruction *, llvm::AllocaInst *> &BaseInstAllocaMap,
     llvm::DenseMap<llvm::Instruction *, llvm::SmallVector<llvm::Instruction *, 8>>
@@ -758,16 +758,6 @@ bool dontArrayifyContiguousValues(
   // is cont indvar
   if (VecInfo.isPinned(I))
     return true;
-
-  /*
-  for (auto *User : I.users()) {
-    if (auto *FCall = llvm::dyn_cast<llvm::CallInst>(User)) {
-      if (utils::isCBSIntrinsic(FCall->getCalledFunction())) {
-        return false;
-      }
-    }
-  }
-  */
 
   llvm::SmallVector<llvm::Instruction *, 4> WL;
   llvm::SmallPtrSet<llvm::Instruction *, 8> UniformValues;
@@ -790,11 +780,13 @@ bool dontArrayifyContiguousValues(
 
         // collect cont and uniform source values
         if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
-          if (VecInfo.getVectorShape(*OpI).isContiguousOrStrided()) {
+          if (not VecInfo.getVectorShape(*OpI).isUniform()) {
             WL.push_back(OpI);
             ContiguousInsts.push_back(OpI);
           } else if (!UniformValues.contains(OpI))
             UniformValues.insert(OpI);
+        } else {
+          return false;
         }
       }
   }
@@ -884,10 +876,43 @@ void SubCFG::arrayifyMultiSubCfgValues(
 #endif
         // if contiguous, and can be recalculated, don't arrayify but store
         // uniform values and insts required for recalculation
-        if (Shape.isContiguousOrStrided()) {
-          if (dontArrayifyContiguousValues(I, BaseInstAllocaMap, ContInstReplicaMap, AllocaIP,
+        const auto dependsOnUniformInstr = [&I, &ContiguousIdx, &VecInfo] {
+          llvm::SmallVector<llvm::Instruction *, 4> WL;
+          llvm::SmallPtrSet<llvm::Value *, 8> LookedAt;
+          WL.push_back(&I);
+          while (!WL.empty()) {
+            auto *WLValue = WL.pop_back_val();
+            if (auto *WLI = llvm::dyn_cast<llvm::Instruction>(WLValue))
+              for (auto *V : WLI->operand_values()) {
+                HIPSYCL_DEBUG_INFO << "[SubCFG] Considering: " << *V << "\n";
+
+                if (V == ContiguousIdx) {
+                //  encounteredIndVar = true;
+                }
+                if (V == ContiguousIdx || VecInfo.isPinned(*V) || llvm::isa<llvm::Constant>(V))
+                  continue;
+                // todo: fix PHIs
+                if (LookedAt.contains(V))
+                  return false;
+                LookedAt.insert(V);
+
+                // collect cont and uniform source values
+                if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
+                  if (auto CallInst = llvm::dyn_cast<llvm::CallInst>(OpI)) {
+                    if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
+                     return true;
+                    }
+                  }
+                }
+              }
+          }
+          return false;
+        }();
+
+        if (Shape.isContiguousOrStrided() or dependsOnUniformInstr) {
+          if (dontArrayifyValues(I, BaseInstAllocaMap, ContInstReplicaMap, AllocaIP,
                                            ReqdArrayElements, ContiguousIdx, VecInfo)) {
-            HIPSYCL_DEBUG_INFO << "[SubCFG] Not arrayifying " << I << "\n";
+            llvm::outs() << "[SubCFG] Not arrayifying " << I << "\n";
             continue;
           }
         }
