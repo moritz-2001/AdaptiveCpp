@@ -893,43 +893,6 @@ void SubCFG::arrayifyMultiSubCfgValues(
             if (V == nullptr) {
               return nullptr;
             }
-          }
-          if (auto *WLI = llvm::dyn_cast<llvm::Instruction>(&I)) {
-            bool isUniform = false;
-            for (auto *V : WLI->operand_values()) {
-              HIPSYCL_DEBUG_INFO << "[SubCFG] Considering: " << *V << "\n";
-
-              if (V == ContiguousIdx || VecInfo.isPinned(*V) || llvm::isa<llvm::Constant>(V))
-                continue;
-
-              // collect cont and uniform source values
-              if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
-                if (auto CallInst = llvm::dyn_cast<llvm::CallInst>(OpI)) {
-                  if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
-                    isUniform = true;
-                  }
-                }
-              }
-            }
-            if (isUniform) {
-              ////// and %cal8i, 4294967295 (and operation, or, add, minus, shl, shr, ) with a
-              /// constant
-              ///// trunc i64 %i.014.i to i32
-              ///// zext i32 %call.i89 to i64
-              if (I.isBinaryOp()) {
-                return llvm::dyn_cast<llvm::Constant>(I.getOperand(0)) or
-                       llvm::dyn_cast<llvm::Constant>(I.getOperand(1));
-              }
-              if (I.getOpcode() == llvm::Instruction::Trunc or
-                  I.getOpcode() == llvm::Instruction::ZExt or
-                  I.getOpcode() == llvm::Instruction::SExt or
-                  I.getOpcode() == llvm::Instruction::BitCast) {
-                return true;
-              }
-            }
-          }
-          return false;
-        }();
             if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
               if (const auto CallInst = llvm::dyn_cast<llvm::CallInst>(OpI)) {
                 if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
