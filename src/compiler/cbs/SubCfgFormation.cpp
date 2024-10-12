@@ -328,7 +328,8 @@ VectorizationInfo getVectorizationInfo(llvm::Function &F, Region &R, llvm::LoopI
   }
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[Dim - 1]),
                          VectorShape::cont());
-  VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, cbs::SgIdGlobalName), VectorShape::cont());
+  VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), VectorShape::cont());
+
   VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   VectorizationAnalysis VecAna{VecInfo, LI, DT, PDT};
@@ -621,7 +622,7 @@ SubCFG::SubCFG(llvm::BasicBlock *EntryBarrier, llvm::AllocaInst *LastBarrierIdSt
     : EntryId_(BarrierIds.lookup(EntryBarrier)), EntryBarrier_(EntryBarrier),
       LastBarrierIdStorage_(LastBarrierIdStorage), EntryBB_(EntryBarrier->getSingleSuccessor()),
       LoadBB_(nullptr), PreHeader_(nullptr), Dim(Dim), HI(HI) {
- // if (not EntryBB_)
+  // if (not EntryBB_)
   //  EntryBarrier->getParent()->viewCFG();
   assert(EntryBB_);
 
@@ -2203,7 +2204,6 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
   auto RImpl = getRegion(F, LI, Blocks);
   Region R{*RImpl};
   auto VecInfo = getVectorizationInfo(F, R, LI, DT, PDT, state.Dim, state, HI);
-  VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   llvm::SmallPtrSet<llvm::BasicBlock *, 2> ExitingBlocks;
   R.getEndingBlocks(ExitingBlocks);
@@ -2324,6 +2324,9 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
        {},
        IndVar,
        nullptr});
+
+
+  //auto x = mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
 
   // The dummy induction variable can now be removed. It should not have any users.
   {
