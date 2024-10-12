@@ -43,6 +43,9 @@
 #include "detail/thread_hierarchy.hpp"
 #include "detail/device_barrier.hpp"
 
+extern "C" uint64_t __hipsycl_cbs_id_subgroup;
+
+
 namespace hipsycl {
 namespace sycl {
 
@@ -220,7 +223,7 @@ struct nd_item
     return sub_group{};
 #else
     return sub_group{
-        static_cast<uint32_t>(get_local_linear_id()) / SGSize,
+      __hipsycl_cbs_id_subgroup,
         (get_local_range().size() + (SGSize-1)) / SGSize,
         _sub_local_memory_ptr,
       _subgroup_id

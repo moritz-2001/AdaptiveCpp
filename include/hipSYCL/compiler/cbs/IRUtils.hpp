@@ -59,7 +59,8 @@ static constexpr const char LocalIdGlobalNameZ[] = "__acpp_cbs_local_id_z";
 static constexpr std::array<const char *, 3> LocalIdGlobalNames{LocalIdGlobalNameX, LocalIdGlobalNameY,
                                                             LocalIdGlobalNameZ};
 
-static constexpr const char SgIdGlobalName[] = "__hipsycl_cbs_local_id_subgroup";
+static constexpr const char SgLocalIdGlobalName[] = "__hipsycl_cbs_local_id_subgroup";
+static constexpr const char SgIdGlobalName[] = "__hipsycl_cbs_id_subgroup";
 
 static constexpr std::string_view WorkGroupSharedMemory = "work_group_shared_memory";
 static constexpr std::string_view SubGroupSharedMemory = "sub_group_shared_memory";

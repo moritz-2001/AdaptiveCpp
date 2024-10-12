@@ -108,6 +108,7 @@ bool removeBarrierCalls(llvm::Function &F, SplitterAnnotationInfo &SAA) {
   Changed |= deleteGlobalVariable(M, LocalIdGlobalNameX);
   Changed |= deleteGlobalVariable(M, LocalIdGlobalNameY);
   Changed |= deleteGlobalVariable(M, LocalIdGlobalNameZ);
+  Changed |= deleteGlobalVariable(M, SgLocalIdGlobalName);
   Changed |= deleteGlobalVariable(M, SgIdGlobalName);
 
   return Changed;
