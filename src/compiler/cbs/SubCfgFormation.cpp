@@ -874,44 +874,54 @@ void SubCFG::arrayifyMultiSubCfgValues(
           continue;
         }
 #endif
-        // if contiguous, and can be recalculated, don't arrayify but store
-        // uniform values and insts required for recalculation
-        const auto dependsOnUniformInstr = [&I, &ContiguousIdx, &VecInfo] {
-          llvm::SmallVector<llvm::Instruction *, 4> WL;
-          llvm::SmallPtrSet<llvm::Value *, 8> LookedAt;
-          WL.push_back(&I);
-          while (!WL.empty()) {
-            auto *WLValue = WL.pop_back_val();
-            if (auto *WLI = llvm::dyn_cast<llvm::Instruction>(WLValue))
-              for (auto *V : WLI->operand_values()) {
-                HIPSYCL_DEBUG_INFO << "[SubCFG] Considering: " << *V << "\n";
+        const auto dependsDirectlyOnSgId = [&I, &ContiguousIdx, &VecInfo] {
+          if (auto CallInst = llvm::dyn_cast<llvm::CallInst>(&I)) {
+            if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
+              return true;
+            }
+          }
+          if (auto *WLI = llvm::dyn_cast<llvm::Instruction>(&I)) {
+            bool isUniform = false;
+            for (auto *V : WLI->operand_values()) {
+              HIPSYCL_DEBUG_INFO << "[SubCFG] Considering: " << *V << "\n";
 
-                if (V == ContiguousIdx) {
-                //  encounteredIndVar = true;
-                }
-                if (V == ContiguousIdx || VecInfo.isPinned(*V) || llvm::isa<llvm::Constant>(V))
-                  continue;
-                // todo: fix PHIs
-                if (LookedAt.contains(V))
-                  return false;
-                LookedAt.insert(V);
+              if (V == ContiguousIdx || VecInfo.isPinned(*V) || llvm::isa<llvm::Constant>(V))
+                continue;
 
-                // collect cont and uniform source values
-                if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
-                  if (auto CallInst = llvm::dyn_cast<llvm::CallInst>(OpI)) {
-                    if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
-                     return true;
-                    }
+              // collect cont and uniform source values
+              if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
+                if (auto CallInst = llvm::dyn_cast<llvm::CallInst>(OpI)) {
+                  if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
+                    isUniform = true;
                   }
                 }
               }
+            }
+            if (isUniform) {
+              ////// and %cal8i, 4294967295 (and operation, or, add, minus, shl, shr, ) with a
+              /// constant
+              ///// trunc i64 %i.014.i to i32
+              ///// zext i32 %call.i89 to i64
+              if (I.isBinaryOp()) {
+                return llvm::dyn_cast<llvm::Constant>(I.getOperand(0)) or
+                       llvm::dyn_cast<llvm::Constant>(I.getOperand(1));
+              }
+              if (I.getOpcode() == llvm::Instruction::Trunc or
+                  I.getOpcode() == llvm::Instruction::ZExt or
+                  I.getOpcode() == llvm::Instruction::SExt or
+                  I.getOpcode() == llvm::Instruction::BitCast) {
+                return true;
+              }
+            }
           }
           return false;
         }();
 
-        if (Shape.isContiguousOrStrided() or dependsOnUniformInstr) {
+        // if contiguous, and can be recalculated, don't arrayify but store
+        // uniform values and insts required for recalculation
+        if (Shape.isContiguousOrStrided() or dependsDirectlyOnSgId) {
           if (dontArrayifyValues(I, BaseInstAllocaMap, ContInstReplicaMap, AllocaIP,
-                                           ReqdArrayElements, ContiguousIdx, VecInfo)) {
+                                 ReqdArrayElements, ContiguousIdx, VecInfo)) {
             llvm::outs() << "[SubCFG] Not arrayifying " << I << "\n";
             continue;
           }
