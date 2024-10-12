@@ -164,6 +164,22 @@ llvm::LoadInst *mergeGVLoadsInEntry(llvm::Function &F, llvm::StringRef VarName,
   return Load;
 }
 
+bool isLoadFromGV(llvm::Value* V, llvm::Function &F, llvm::StringRef VarName) {
+  if (not V) {
+    return false;
+  }
+  auto SizeT = F.getParent()->getDataLayout().getLargestLegalIntType(F.getContext());
+  auto *GV = F.getParent()->getOrInsertGlobal(VarName, SizeT);
+  for (auto U : GV->users()) {
+    if (auto *LI = llvm::dyn_cast<llvm::LoadInst>(U); LI && LI->getFunction() == &F) {
+      if (V == LI) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 // parses the range dimensionality from the mangled kernel name
 std::size_t getRangeDim(llvm::Function &F) {
   auto FName = F.getName();
@@ -437,15 +453,18 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 
   if (HI.Level == HierarchicalLevel::CBS) {
     Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
-    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateURem(
+    VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Builder.CreateURem(
         IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
   } else if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
-    assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgIdGlobalName));
+    assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     VMap[HI.SGIdArg] = Idx;
     Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     auto StridedInner = llvm::cast<llvm::Instruction>(HI.OuterIndex)->getOperand(0);
     Idx = Builder.CreateAdd(Idx, StridedInner, "stride.inner.add.");
   }
+
+  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_GROUP)
+    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
 
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
     VMap[ContiguousIdx] = Idx; // ContiguousIdx = idx + sg_id
@@ -455,7 +474,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     // InnerMost induction variable + SgSize
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] =
-        Builder.CreateAdd(IndVars.back(), mergeGVLoadsInEntry(F, cbs::SgIdGlobalName));
+        Builder.CreateAdd(IndVars.back(), mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     VMap[ContiguousIdx] = ContiguousIdx;
   }
 
@@ -465,8 +484,8 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     VMap[HI.ContiguousIdx] = Idx;
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] = Idx;
     // VMap[HI.SGIdArg] = IndVars[0];
-    assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgIdGlobalName));
-    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = IndVars[0];
+    assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
+    VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = IndVars[0];
     llvm::SmallVector<llvm::BasicBlock *> Blocks{Latches.begin(), Latches.end()};
     Blocks.push_back(LoadBB);
     llvm::remapInstructionsInBlocks(Blocks, VMap);
@@ -719,7 +738,11 @@ void SubCFG::replicate(
   EntryBB_ = PreHeader_;
   ExitBB_ = Latches[0];
   HI.ContiguousIdx = Idx;
-  HI.SGIdArg = HI.Level == HierarchicalLevel::H_CBS_SUBGROUP ? WIIndVars_.back() : (HI.Level == HierarchicalLevel::CBS ? &*VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] : nullptr) ;
+  HI.SGIdArg = HI.Level == HierarchicalLevel::H_CBS_SUBGROUP
+                   ? WIIndVars_.back()
+                   : (HI.Level == HierarchicalLevel::CBS
+                          ? &*VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)]
+                          : nullptr);
 }
 
 // remove incoming PHI blocks that no longer actually have an edge to the PHI
@@ -759,6 +782,8 @@ bool dontArrayifyValues(
   if (VecInfo.isPinned(I))
     return true;
 
+  auto& F = *I.getParent()->getParent();
+
   llvm::SmallVector<llvm::Instruction *, 4> WL;
   llvm::SmallPtrSet<llvm::Instruction *, 8> UniformValues;
   llvm::SmallVector<llvm::Instruction *, 8> ContiguousInsts;
@@ -780,7 +805,7 @@ bool dontArrayifyValues(
 
         // collect cont and uniform source values
         if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
-          if (not VecInfo.getVectorShape(*OpI).isUniform()) {
+          if (not VecInfo.getVectorShape(*OpI).isUniform() or isLoadFromGV(OpI, F, cbs::SgIdGlobalName) or isLoadFromGV(OpI, F, cbs::SgLocalIdGlobalName)) {
             WL.push_back(OpI);
             ContiguousInsts.push_back(OpI);
           } else if (!UniformValues.contains(OpI))
@@ -797,7 +822,7 @@ bool dontArrayifyValues(
       continue;
     HIPSYCL_DEBUG_INFO << "[SubCFG] Store required uniform value to single element alloca " << I
                        << "\n";
-    auto *Alloca = utils::arrayifyInstruction(AllocaIP, UI, IndVar, nullptr);
+    auto *Alloca = utils::arrayifyInstruction(F.getEntryBlock().getFirstNonPHI(), UI, IndVar, nullptr);
     BaseInstAllocaMap.insert({UI, Alloca});
     VecInfo.setVectorShape(*Alloca, hipsycl::compiler::VectorShape::uni());
   }
@@ -863,21 +888,10 @@ void SubCFG::arrayifyMultiSubCfgValues(
         auto Shape = VecInfo.getVectorShape(I);
         HIPSYCL_DEBUG_ERROR << "VECTOR INFO: " << Shape << "\n";
 
-#ifndef HIPSYCL_NO_PHIS_IN_SPLIT
-        // if value is uniform, just store to 1-wide alloca
-        if (Shape.isUniform()) {
-          HIPSYCL_DEBUG_INFO << "[SubCFG] Value uniform, store to single element alloca " << I
-                             << "\n";
-          auto *Alloca = utils::arrayifyInstruction(AllocaIP, &I, ContiguousIdx, nullptr);
-          InstAllocaMap.insert({&I, Alloca});
-          VecInfo.setVectorShape(*Alloca, VectorShape::uni());
-          continue;
-        }
-#endif
-        const auto dependsDirectlyOnSgId = [&I, &ContiguousIdx, &VecInfo] {
-          if (auto CallInst = llvm::dyn_cast<llvm::CallInst>(&I)) {
-            if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
-              return true;
+        const auto isTrivialStepAway = [&F](llvm::Instruction &I,  llvm::StringRef S) {
+          auto getInsideRvUniform = [](llvm::Value* V)-> llvm::Value* {
+            if (V == nullptr) {
+              return nullptr;
             }
           }
           if (auto *WLI = llvm::dyn_cast<llvm::Instruction>(&I)) {
@@ -916,16 +930,55 @@ void SubCFG::arrayifyMultiSubCfgValues(
           }
           return false;
         }();
+            if (auto *OpI = llvm::dyn_cast<llvm::Instruction>(V)) {
+              if (const auto CallInst = llvm::dyn_cast<llvm::CallInst>(OpI)) {
+                if (CallInst->getCalledFunction()->getName().contains("rv_is_uniform")) {
+                  return CallInst->getOperand(0);
+                }
+              }
+            }
+            return nullptr;
+          };
+          auto *V = [&]() -> llvm::Value* {
+            if (I.isBinaryOp()) {
+              if (llvm::dyn_cast<llvm::Constant>(I.getOperand(0))) {
+                return I.getOperand(1);
+              }
+              return I.getOperand(0);
+            }
+            if (I.getOpcode() == llvm::Instruction::Trunc or
+                I.getOpcode() == llvm::Instruction::ZExt or
+                I.getOpcode() == llvm::Instruction::SExt or
+                I.getOpcode() == llvm::Instruction::BitCast) {
+              return I.getOperand(0);
+                }
+            return nullptr;
+          }();
+
+          return isLoadFromGV(&I, F, S) or isLoadFromGV(getInsideRvUniform(&I), F, S) or isLoadFromGV(V, F, S) or isLoadFromGV(getInsideRvUniform(V), F, S);
+        };
 
         // if contiguous, and can be recalculated, don't arrayify but store
         // uniform values and insts required for recalculation
-        if (Shape.isContiguousOrStrided() or dependsDirectlyOnSgId) {
+        if (Shape.isContiguousOrStrided() or isTrivialStepAway(I, cbs::SgIdGlobalName) or isTrivialStepAway(I, cbs::SgLocalIdGlobalName)) {
           if (dontArrayifyValues(I, BaseInstAllocaMap, ContInstReplicaMap, AllocaIP,
                                  ReqdArrayElements, ContiguousIdx, VecInfo)) {
             llvm::outs() << "[SubCFG] Not arrayifying " << I << "\n";
             continue;
           }
         }
+
+#ifndef HIPSYCL_NO_PHIS_IN_SPLIT
+        // if value is uniform, just store to 1-wide alloca
+        if (Shape.isUniform()) {
+          HIPSYCL_DEBUG_INFO << "[SubCFG] Value uniform, store to single element alloca " << I
+                             << "\n";
+          auto *Alloca = utils::arrayifyInstruction(AllocaIP, &I, ContiguousIdx, nullptr);
+          InstAllocaMap.insert({&I, Alloca});
+          VecInfo.setVectorShape(*Alloca, VectorShape::uni());
+          continue;
+        }
+#endif
 
         // create wide alloca and store the value
         auto *Alloca = utils::arrayifyInstruction(AllocaIP, &I, ContiguousIdx, ReqdArrayElements);
@@ -1010,6 +1063,10 @@ void SubCFG::loadUniformAndRecalcContValues(
   auto ContiguousIdx = HI.getContiguousIdx();
   llvm::Value *NewContIdx = VMap[ContiguousIdx];
   UniVMap[ContiguousIdx] = NewContIdx;
+
+  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_GROUP) {
+    UniVMap[mergeGVLoadsInEntry(*LoadBB_->getParent(), cbs::SgIdGlobalName)] = VMap[mergeGVLoadsInEntry(*LoadBB_->getParent(), cbs::SgIdGlobalName)];
+  }
 
   // copy local id load value to univmap
   for (size_t D = 0; D < this->Dim; ++D) {
@@ -1381,7 +1438,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
                      std::vector<SubCFG> &SubCfgs, llvm::Value *ReqdArrayElements,
                      VectorizationInfo &VecInfo, llvm::Function &F, HierarchicalSplitInfo HI) {
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP)
-    assert(mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)->getNumUses() == 0);
+    assert(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)->getNumUses() == 0);
 
   auto *MDAlloca = llvm::MDNode::get(
       EntryBlock->getContext(), {llvm::MDString::get(EntryBlock->getContext(), MDKind::LoopState)});
@@ -1507,7 +1564,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
 
 
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
-    assert(mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)->getNumUses() == 0);
+    assert(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)->getNumUses() == 0);
   }
 }
 
@@ -2132,7 +2189,7 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
   };
 
   llvm::Value *NewIndVar = GetFromArgsOrDummyLoad(HI.ContiguousIdx);
-  llvm::Value *SGIdArg = GetFromArgsOrDummyLoad(mergeGVLoadsInEntry(F, cbs::SgIdGlobalName));
+  llvm::Value *SGIdArg = GetFromArgsOrDummyLoad(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
 
   // Replace SGIdArg (and all its uses) with load from global variable (SgIdGlobalName)
   // This makes the handling of SgId simpler.
@@ -2143,8 +2200,8 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
       HIPSYCL_DEBUG_ERROR << "SGIDArg user: " << *U << "\n";
     }
     SGIdArg->replaceAllUsesWith(
-        mergeGVLoadsInEntry(*NewF, cbs::SgIdGlobalName, SGIdArg->getType()));
-    SGIdArg = mergeGVLoadsInEntry(*NewF, cbs::SgIdGlobalName);
+        mergeGVLoadsInEntry(*NewF, cbs::SgLocalIdGlobalName, SGIdArg->getType()));
+    SGIdArg = mergeGVLoadsInEntry(*NewF, cbs::SgLocalIdGlobalName);
     HIPSYCL_DEBUG_ERROR << "New SGIDArg: " << *SGIdArg << "\n";
   }
 
@@ -2178,7 +2235,7 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
 
   // non-entry block Allocas are considered broken, move to entry.
   moveAllocasToEntry(F, Blocks);
-  mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
+  mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName);
 
   auto RImpl = getRegion(F, LI, Blocks);
   Region R{*RImpl};
@@ -2294,6 +2351,8 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
   if constexpr (USE_RV) {
     assert(not utils::hasSubBarriers(F, SAA));
   }
+
+  mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
 
   formSubCfgGeneric(
       F, LI, DT, PDT, SAA, state, LocalSize, ReqdArrayElements,
