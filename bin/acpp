@@ -1449,6 +1449,8 @@ class omp_accelerated_invocation:
       ]
     flags += self._cxx_flags
 
+    flags += ["-march=native"]
+
     return flags
 
   def get_linker_flags(self):
