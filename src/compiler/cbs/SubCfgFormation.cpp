@@ -2475,9 +2475,11 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
     std::reverse(state.LocalIdGlobalNames.begin(), state.LocalIdGlobalNames.begin() + state.Dim);
   }
 
+  const bool hasSubbarriers = utils::hasSubBarriers(F, *SAA);
+
   formSubCfgs(F, LI, DT, PDT, *SAA, state);
 
-  if constexpr (not USE_RV and INCOMPLETE_SGS_OPT) {
+  if (not USE_RV and INCOMPLETE_SGS_OPT and (hasSubbarriers or ALWAYS_CREATE_SUBGROUP_SUB_CFGS)) {
     multiplyFunction(F, state);
   }
 
