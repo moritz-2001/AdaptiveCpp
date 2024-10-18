@@ -2317,9 +2317,11 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
 
   mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
 
+  const auto HiLevel = ALWAYS_CREATE_SUBGROUP_SUB_CFGS ? HierarchicalLevel::H_CBS_GROUP : (utils::hasSubBarriers(F, SAA) ? HierarchicalLevel::H_CBS_GROUP : HierarchicalLevel::CBS);
+
   formSubCfgGeneric(
       F, LI, DT, PDT, SAA, state, LocalSize, ReqdArrayElements,
-      {utils::hasSubBarriers(F, SAA) ? HierarchicalLevel::H_CBS_GROUP : HierarchicalLevel::CBS,
+      {HiLevel,
        {},
        {},
        IndVar,
