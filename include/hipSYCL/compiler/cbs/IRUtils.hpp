@@ -34,6 +34,9 @@ struct MDKind {
 
 namespace cbs {
 static constexpr const char BarrierIntrinsicName[] = "__acpp_cbs_barrier";
+
+static constexpr std::string_view WorkGroupSharedMemory = "work_group_shared_memory";
+
 static constexpr const char LocalIdGlobalNameX[] = "__acpp_cbs_local_id_x";
 static constexpr const char LocalIdGlobalNameY[] = "__acpp_cbs_local_id_y";
 static constexpr const char LocalIdGlobalNameZ[] = "__acpp_cbs_local_id_z";
@@ -154,6 +157,8 @@ llvm::LoadInst *loadFromAlloca(llvm::AllocaInst *Alloca, llvm::Value *Idx,
                                llvm::Instruction *InsertBefore, const llvm::Twine &NamePrefix = "");
 
 llvm::AllocaInst *getLoopStateAllocaForLoad(llvm::LoadInst &LInst);
+
+bool deleteGlobalVariable(llvm::Module *M, llvm::StringRef VarName);
 
 template <class UserType, class Func> bool anyOfUsers(llvm::Value *V, Func &&L) {
   for (auto *U : V->users())

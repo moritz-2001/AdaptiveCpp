@@ -1412,10 +1412,27 @@ void execute(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
 
   llvm::IRBuilder Builder{F.getContext()};
 
-  for (auto i = Dim; i < 3; ++i) {
-    replaceUsesOfGVWith(F, reorder(LocalSizeGlobalNames, Dim, IsSscp)[i], Builder.getIntN(64, 1));
-    replaceUsesOfGVWith(F, reorder(LocalIdGlobalNames, Dim, IsSscp)[i], Builder.getIntN(64, 0));
+  {
+    const auto localSizeGlobalNames = reorder(cbs::LocalSizeGlobalNames, Dim, IsSscp);
+    const auto localIdGlobalNames = reorder(cbs::LocalIdGlobalNames, Dim, IsSscp);
+    for (auto i = Dim; i < 3; ++i) {
+      replaceUsesOfGVWith(F, localSizeGlobalNames[i], Builder.getIntN(64, 1));
+      replaceUsesOfGVWith(F, localIdGlobalNames[i], Builder.getIntN(64, 0));
+    }
   }
+
+  // Replace scratch memory global variable with scratch memory
+  {
+    Builder.SetInsertPoint(F.getEntryBlock().getFirstNonPHIOrDbgOrLifetime());
+    // 128 kiB as local memory for group algorithms
+    {
+      auto *WorkgroupScratchMemoryAlloca = Builder.CreateAlloca(
+          llvm::IntegerType::getInt8Ty(F.getContext()), Builder.getIntN(64, 1024 * 1024));
+      WorkgroupScratchMemoryAlloca->setAlignment(llvm::Align(128));
+      replaceUsesOfGVWith(F, cbs::WorkGroupSharedMemory, WorkgroupScratchMemoryAlloca);
+    }
+  }
+  utils::deleteGlobalVariable(F.getParent(), WorkGroupSharedMemory);
 
   assert(!llvm::verifyFunction(F, &llvm::outs()));
 }

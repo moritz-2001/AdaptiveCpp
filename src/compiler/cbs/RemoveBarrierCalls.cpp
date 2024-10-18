@@ -33,35 +33,6 @@ namespace {
 
 using namespace cbs;
 
-bool deleteGlobalVariable(llvm::Module *M, llvm::StringRef VarName) {
-  if (auto *GV = M->getGlobalVariable(VarName)) {
-    llvm::SmallVector<llvm::Instruction *, 8> WL;
-    for (auto U : GV->users())
-      if (auto LI = llvm::dyn_cast<llvm::LoadInst>(U); LI && LI->user_empty())
-        WL.push_back(LI);
-    for (auto *LI : WL)
-      LI->eraseFromParent();
-
-    if (GV->getNumUses() == 0 ||
-        std::none_of(GV->user_begin(), GV->user_end(), [GV](llvm::User *U) { return U != GV; })) {
-      HIPSYCL_DEBUG_INFO << "[RemoveBarrierCalls] Clean-up global variable " << *GV << "\n";
-      GV->eraseFromParent();
-      return true;
-    }
-    HIPSYCL_DEBUG_INFO << "[RemoveBarrierCalls] Global variable still in use " << VarName << "\n";
-    for (auto *U : GV->users()) {
-      HIPSYCL_DEBUG_INFO << "[RemoveBarrierCalls] >>> " << *U;
-      if (auto I = llvm::dyn_cast<llvm::Instruction>(U)) {
-        HIPSYCL_DEBUG_EXECUTE_INFO(
-          llvm::outs() << " in " << I->getFunction()->getName()
-        );
-      }
-      HIPSYCL_DEBUG_EXECUTE_INFO(llvm::outs() << "\n");
-    }
-  }
-  return false;
-}
-
 bool removeBarrierCalls(llvm::Function &F, SplitterAnnotationInfo &SAA) {
   if (!SAA.isKernelFunc(&F))
     return false;
@@ -97,9 +68,9 @@ bool removeBarrierCalls(llvm::Function &F, SplitterAnnotationInfo &SAA) {
 
   bool Changed = !BarriersToRemove.empty();
 
-  Changed |= deleteGlobalVariable(M, LocalIdGlobalNameX);
-  Changed |= deleteGlobalVariable(M, LocalIdGlobalNameY);
-  Changed |= deleteGlobalVariable(M, LocalIdGlobalNameZ);
+  Changed |= utils::deleteGlobalVariable(M, LocalIdGlobalNameX);
+  Changed |= utils::deleteGlobalVariable(M, LocalIdGlobalNameY);
+  Changed |= utils::deleteGlobalVariable(M, LocalIdGlobalNameZ);
 
   return Changed;
 }
