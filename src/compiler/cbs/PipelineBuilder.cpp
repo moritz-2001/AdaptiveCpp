@@ -36,6 +36,7 @@
 #include "hipSYCL/compiler/cbs/PHIsToAllocas.hpp"
 #include "hipSYCL/compiler/cbs/RemoveBarrierCalls.hpp"
 #include "hipSYCL/compiler/cbs/SimplifyKernel.hpp"
+#include "hipSYCL/compiler/cbs/RemoveGlobalVars.h"
 #include "hipSYCL/compiler/cbs/SplitterAnnotationAnalysis.hpp"
 #include "hipSYCL/compiler/cbs/SubCfgFormation.hpp"
 #include "hipSYCL/compiler/llvm-to-backend/host/HostKernelWrapperPass.hpp"
@@ -81,7 +82,6 @@ void registerCBSPipeline(llvm::ModulePassManager &MPM, OptLevel Opt, bool IsSscp
   llvm::FunctionPassManager FPM;
   FPM.addPass(LoopSplitterInliningPass{});
 
-  if (Opt != OptLevel::O0) {
     FPM.addPass(KernelFlatteningPass{});
     FPM.addPass(SimplifyKernelPass{});
 
@@ -98,7 +98,6 @@ void registerCBSPipeline(llvm::ModulePassManager &MPM, OptLevel Opt, bool IsSscp
 #endif
 
     FPM.addPass(llvm::SimplifyCFGPass{});
-  }
 
   FPM.addPass(SimplifyKernelPass{});
 #ifdef HIPSYCL_NO_PHIS_IN_SPLIT
@@ -118,6 +117,7 @@ void registerCBSPipeline(llvm::ModulePassManager &MPM, OptLevel Opt, bool IsSscp
     FPM.addPass(LoopsParallelMarkerPass{});
   
   MPM.addPass(llvm::createModuleToFunctionPassAdaptor(std::move(FPM)));
+  MPM.addPass(RemoveGlobalVars{});
   MPM.addPass(llvm::IPSCCPPass{});
    {
      llvm::FunctionPassManager FPM;

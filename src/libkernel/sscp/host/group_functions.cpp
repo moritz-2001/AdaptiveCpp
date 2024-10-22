@@ -24,7 +24,7 @@ extern "C" size_t __acpp_cbs_local_id_z;
 extern "C" size_t __acpp_cbs_local_size_x;
 extern "C" size_t __acpp_cbs_local_size_y;
 extern "C" size_t __acpp_cbs_local_size_z;
-
+//
 // TODO CBS AND RV REDUCE MISSING OPS
 
 // TODO for scan no impls in header?

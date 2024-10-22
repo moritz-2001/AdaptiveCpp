@@ -42,7 +42,7 @@ HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_local_id() {
 #else
   return __hipsycl_cbs_local_id_subgroup;
 #endif
-}
+}//
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_size() {
 #if USE_RV

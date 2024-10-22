@@ -81,19 +81,9 @@ struct HierarchicalSplitInfo {
   llvm::ArrayRef<llvm::Value *> OuterLocalSize;
   llvm::Value *OuterIndex;
   llvm::Value *ContiguousIdx;
-  llvm::Value *SGIdArg;
+  // llvm::Value *SGIdArg;
   llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8> *ArgsToAloca;
-
-  llvm::Value *getContiguousIdx() {
-    switch (Level) {
-    case HierarchicalLevel::CBS:
-    case HierarchicalLevel::H_CBS_GROUP:
-      return ContiguousIdx;
-    case HierarchicalLevel::H_CBS_SUBGROUP:
-      return SGIdArg;
-    }
-    assert(false);
-  }
+  llvm::Value *WIContiguousIdx = nullptr;
 };
 
 struct State {
@@ -329,7 +319,6 @@ VectorizationInfo getVectorizationInfo(llvm::Function &F, Region &R, llvm::LoopI
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[Dim - 1]),
                          VectorShape::cont());
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), VectorShape::cont());
-
   VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   VectorizationAnalysis VecAna{VecInfo, LI, DT, PDT};
@@ -344,7 +333,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
                        llvm::ValueToValueMapTy &VMap,
                        llvm::SmallVector<llvm::BasicBlock *, 3> &Latches,
                        llvm::BasicBlock *&LastHeader, llvm::Value *&ContiguousIdx, State state,
-                       HierarchicalSplitInfo HI) {
+                       HierarchicalSplitInfo& HI) {
   const auto &DL = F.getParent()->getDataLayout();
   auto *LoadBB = LastHeader;
   llvm::IRBuilder Builder{LoadBB, LoadBB->getFirstInsertionPt()};
@@ -405,7 +394,8 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 #if not USE_RV
     if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
       assert(D == InnerMost);
-      auto *ContCond = Builder.CreateICmpULT(ContiguousIdx, HI.OuterLocalSize.back(),
+      HI.WIContiguousIdx = Builder.CreateAdd(ContiguousIdx, HI.OuterIndex);
+      auto *ContCond = Builder.CreateICmpULT(HI.WIContiguousIdx, HI.OuterLocalSize.back(),
                                              "exit.cont_cond." + Suffix);
 #if INCOMPLETE_SGS_OPT
       auto* noIncompleteSgs = mergeGVLoadsInEntry(F, "no-incomplete-sgs", ContCond->getType());
@@ -426,7 +416,6 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     Latches[D]->getTerminator()->replaceSuccessorWith(AfterBB, Latches[D - 1]);
     IndVars[D]->replaceIncomingBlockWith(&F.getEntryBlock(), IndVars[D - 1]->getParent());
   }
-  VMap[AfterBB] = Latches[InnerMost];
 
   // Mark work-item loop as parallel
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
@@ -436,6 +425,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
         llvm::makePostTransformationMetadata(F.getContext(), nullptr, {}, {MDWorkItemLoop});
     Latches[InnerMost]->getTerminator()->setMetadata("llvm.loop", LoopID);
   }
+  VMap[AfterBB] = Latches[InnerMost];
 
   // add contiguous ind var calculation to load block
   Builder.SetInsertPoint(IndVars[InnerMost]->getParent(), ++IndVars[InnerMost]->getIterator());
@@ -452,31 +442,23 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[D])] = IndVars[D];
   }
 
+
+  Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
   if (HI.Level == HierarchicalLevel::CBS) {
-    Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
+    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
     VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Builder.CreateURem(
         IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
   } else if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
-    assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-    VMap[HI.SGIdArg] = Idx;
-    Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
-    auto StridedInner = llvm::cast<llvm::Instruction>(HI.OuterIndex)->getOperand(0);
-    Idx = Builder.CreateAdd(Idx, StridedInner, "stride.inner.add.");
-  }
-
-  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_GROUP)
-    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
-
-  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
-    VMap[ContiguousIdx] = Idx; // ContiguousIdx = idx + sg_id
-    ContiguousIdx = Idx;
+    //assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
+    VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Idx;
   } else {
     assert(HI.Level == HierarchicalLevel::H_CBS_GROUP);
-    Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     // InnerMost induction variable + SgSize
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] =
         Builder.CreateAdd(IndVars.back(), mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-    VMap[ContiguousIdx] = ContiguousIdx;
+    Idx = Builder.CreateAdd(Idx, mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
+    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] =
+        Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
   }
 
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
@@ -484,15 +466,13 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     // Old Idx becomes new Idx
     VMap[HI.ContiguousIdx] = Idx;
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] = Idx;
-    // VMap[HI.SGIdArg] = IndVars[0];
-    assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-    VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = IndVars[0];
     llvm::SmallVector<llvm::BasicBlock *> Blocks{Latches.begin(), Latches.end()};
-    Blocks.push_back(LoadBB);
+    //Blocks.push_back(LoadBB);
     llvm::remapInstructionsInBlocks(Blocks, VMap);
-
-    //HI.SGIdArg = VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)];
   }
+
+  VMap[ContiguousIdx] = Idx;
+  ContiguousIdx = Idx;
 }
 
 class SubCFG {
@@ -626,7 +606,7 @@ SubCFG::SubCFG(llvm::BasicBlock *EntryBarrier, llvm::AllocaInst *LastBarrierIdSt
   //  EntryBarrier->getParent()->viewCFG();
   assert(EntryBB_);
 
-  assert(HI.ContiguousIdx && "Must have found __acpp_cbs_local_id_{x,y,z}");
+  //assert(HI.ContiguousIdx && "Must have found __acpp_cbs_local_id_{x,y,z}");
 
   llvm::SmallVector<llvm::BasicBlock *, 4> WL{EntryBarrier};
   while (!WL.empty()) {
@@ -715,7 +695,7 @@ void SubCFG::replicate(
   for (size_t D = 0; D < LocalSize.size(); ++D) {
     WIIndVars_.push_back(
         VMap[HI.Level == HierarchicalLevel::H_CBS_SUBGROUP
-                 ? HI.SGIdArg
+                 ? mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)
                  : mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[D])]);
   }
 
@@ -731,6 +711,8 @@ void SubCFG::replicate(
   loadUniformAndRecalcContValues(BaseInstAllocaMap, ContInstReplicaMap, PreHeader_, VMap,
                                  loadToAlloca, state);
 
+  //F.viewCFG();
+
   llvm::SmallVector<llvm::BasicBlock *, 8> BlocksToRemap{NewBlocks_.begin(), NewBlocks_.end()};
   llvm::remapInstructionsInBlocks(BlocksToRemap, VMap);
 
@@ -739,11 +721,6 @@ void SubCFG::replicate(
   EntryBB_ = PreHeader_;
   ExitBB_ = Latches[0];
   HI.ContiguousIdx = Idx;
-  HI.SGIdArg = HI.Level == HierarchicalLevel::H_CBS_SUBGROUP
-                   ? WIIndVars_.back()
-                   : (HI.Level == HierarchicalLevel::CBS
-                          ? &*VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)]
-                          : nullptr);
 }
 
 // remove incoming PHI blocks that no longer actually have an edge to the PHI
@@ -845,7 +822,7 @@ void SubCFG::arrayifyMultiSubCfgValues(
       OtherCFGBlocks.insert(Cfg.Blocks_.begin(), Cfg.Blocks_.end());
   }
 
-  auto *ContiguousIdx = HI.getContiguousIdx();
+  auto *ContiguousIdx = HI.ContiguousIdx;
 
   HIPSYCL_DEBUG_ERROR << "[SubCFG] ARRAIFY \n";
 
@@ -971,7 +948,7 @@ void SubCFG::loadMultiSubCfgValues(
         &ContInstReplicaMap,
     llvm::BasicBlock *UniformLoadBB, llvm::ValueToValueMapTy &VMap,
     llvm::DenseMap<llvm::LoadInst *, llvm::AllocaInst *> &LoadToAlloca) {
-  llvm::Value *NewContIdx = VMap[HI.getContiguousIdx()];
+  llvm::Value *NewContIdx = VMap[HI.ContiguousIdx];
 
   auto *LoadTerm = LoadBB_->getTerminator();
   auto *UniformLoadTerm = UniformLoadBB->getTerminator();
@@ -1024,13 +1001,9 @@ void SubCFG::loadUniformAndRecalcContValues(
   llvm::ValueToValueMapTy UniVMap;
   auto *LoadTerm = LoadBB_->getTerminator();
   auto *UniformLoadTerm = UniformLoadBB->getTerminator();
-  auto ContiguousIdx = HI.getContiguousIdx();
+  auto ContiguousIdx = HI.ContiguousIdx;
   llvm::Value *NewContIdx = VMap[ContiguousIdx];
   UniVMap[ContiguousIdx] = NewContIdx;
-
-  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_GROUP) {
-    UniVMap[mergeGVLoadsInEntry(*LoadBB_->getParent(), cbs::SgIdGlobalName)] = VMap[mergeGVLoadsInEntry(*LoadBB_->getParent(), cbs::SgIdGlobalName)];
-  }
 
   // copy local id load value to univmap
   for (size_t D = 0; D < this->Dim; ++D) {
@@ -1152,7 +1125,7 @@ void SubCFG::fixSingleSubCfgValues(
   llvm::IRBuilder Builder{LoadIP};
 
   llvm::DenseMap<llvm::Instruction *, llvm::Instruction *> InstLoadMap;
-  llvm::Value *ContiguousIdx = HI.getContiguousIdx();
+  llvm::Value *ContiguousIdx = HI.ContiguousIdx;
 
   for (auto *BB : NewBlocks_) {
     llvm::SmallVector<llvm::Instruction *, 16> Insts{};
@@ -1401,9 +1374,6 @@ llvm::GetElementPtrInst * createGEP(llvm::AllocaInst *Alloca,
 void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
                      std::vector<SubCFG> &SubCfgs, llvm::Value *ReqdArrayElements,
                      VectorizationInfo &VecInfo, llvm::Function &F, HierarchicalSplitInfo HI) {
-  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP)
-    assert(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)->getNumUses() == 0);
-
   auto *MDAlloca = llvm::MDNode::get(
       EntryBlock->getContext(), {llvm::MDString::get(EntryBlock->getContext(), MDKind::LoopState)});
 
@@ -1514,7 +1484,7 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
 
       for (auto &SubCfg : SubCfgs) {
         auto *GepIp = SubCfg.getLoadBB()->getFirstNonPHIOrDbgOrLifetime();
-        auto *ContiguousIdx = SubCfg.getHI().getContiguousIdx();
+        auto *ContiguousIdx = SubCfg.getHI().ContiguousIdx;
 
         llvm::IRBuilder LoadBuilder{GepIp};
         auto* GEP = createGEP(Alloca, GepIp, PaddingAdded, ContiguousIdx);
@@ -1601,7 +1571,7 @@ private:
         Storage = Builder.CreateLoad(Intrinsic.getFunctionType()->getReturnType(), Storage);
       }
       auto* SGIterationsLeft = [&]() {
-        auto* Idx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().ContiguousIdx)->getOperand(1);
+        auto* Idx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().WIContiguousIdx)->getOperand(1);
         auto* Size = SubCfg.getHI().OuterLocalSize.back();
         auto* GlobalIterationsLeft = Builder.CreateSub(Size, Idx);
         auto* lessThanSgSize = Builder.CreateICmpULT(GlobalIterationsLeft, Builder.getInt64(SGSize));
@@ -1621,7 +1591,7 @@ private:
           }
         }
         auto* Add = llvm::ConstantVector::get(v);
-        auto* Idx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().ContiguousIdx)->getOperand(1);
+        auto* Idx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().WIContiguousIdx)->getOperand(1);
         auto* splat = Builder.CreateVectorSplat(llvm::ElementCount::getFixed(SGSize), Idx);
         auto* sAdd = Builder.CreateAdd(splat, Add);
         return Builder.CreateICmpULT(sAdd, Builder.CreateVectorSplat(llvm::ElementCount::getFixed(SGSize), SubCfg.getHI().OuterLocalSize.back()));
@@ -1636,7 +1606,7 @@ private:
     }
 
     Builder.SetInsertPoint(&Intrinsic);
-    return extractElement(Builder, res.first, SubCfg.getHI().SGIdArg, Intrinsic);
+    return extractElement(Builder, res.first, SubCfg.getHI().ContiguousIdx, Intrinsic);
   }
 
   static std::pair<llvm::Value *, Shape> getOrCreateValue(
@@ -1665,7 +1635,7 @@ private:
         LookedAt.insert(Inst);
         Result.insert(Inst);
 
-        if (Inst == SubCfg.getHI().SGIdArg) {
+        if (Inst == SubCfg.getHI().ContiguousIdx) {
           continue;
         }
 
@@ -1704,8 +1674,8 @@ private:
       auto *Value = Builder.CreateAlloca(
           OrderedInsts.back()->getType(),
           llvm::ConstantInt::getIntegerValue(
-              SubCfg.getHI().SGIdArg->getType(),
-              llvm::APInt(SubCfg.getHI().SGIdArg->getType()->getIntegerBitWidth(), SGSize)));
+              SubCfg.getHI().ContiguousIdx->getType(),
+              llvm::APInt(SubCfg.getHI().ContiguousIdx->getType()->getIntegerBitWidth(), SGSize)));
 
       // Replicate instructions
       llvm::SmallPtrSet<llvm::Instruction *, 16> InstsToRemap;
@@ -1714,15 +1684,15 @@ private:
       Builder.SetInsertPoint(LoopBody->getFirstNonPHI());
       auto *LoadInductionVar = Builder.CreateLoad(Alloca->getAllocatedType(), Alloca);
 
-      UniVMap[SubCfg.getHI().SGIdArg] = LoadInductionVar;
-      UniVMap[SubCfg.getHI().ContiguousIdx] = Builder.CreateAdd(
+      UniVMap[SubCfg.getHI().ContiguousIdx] = LoadInductionVar;
+      UniVMap[SubCfg.getHI().WIContiguousIdx] = Builder.CreateAdd(
           LoadInductionVar,
-          llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().ContiguousIdx)->getOperand(1));
+          llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().WIContiguousIdx)->getOperand(1));
 
       llvm::Instruction *LastInstruction{};
       for (auto *Inst : OrderedInsts) {
         LastInstruction = Inst;
-        if (Inst == SubCfg.getHI().SGIdArg || Inst == SubCfg.getHI().ContiguousIdx) {
+        if (Inst == SubCfg.getHI().ContiguousIdx || Inst == SubCfg.getHI().WIContiguousIdx) {
           continue;
         }
         auto *IClone = Inst->clone();
@@ -1756,7 +1726,7 @@ private:
         return {Storage, Shape::VARYING};
       } else {
         assert(llvm::dyn_cast<llvm::Argument>(Storage));
-        auto *SgIdx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().ContiguousIdx);
+        auto *SgIdx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().WIContiguousIdx);
         assert(SgIdx);
         auto *GroupIdx = SgIdx->getOperand(1);
         return {Builder.CreateGEP(Intrinsic.getArgOperand(0)->getType(), Storage, {GroupIdx}),
@@ -2029,7 +1999,7 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
   auto Blocks = Cfg.getNewBlocks(); // copy
   Blocks.insert(Blocks.begin(), Cfg.getLoadBB());
 
-  assert(!llvm::verifyFunction(F));
+  assert(!llvm::verifyFunction(F, &llvm::outs()));
   llvm::SetVector<llvm::Value *> Inputs, Outputs;
   llvm::CodeExtractorAnalysisCache CEAC{F};
   llvm::CodeExtractor CE{Blocks};
@@ -2152,7 +2122,6 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
         V->getType(), llvm::UndefValue::get(llvm::PointerType::get(V->getType(), 0)));
   };
 
-  llvm::Value *NewIndVar = GetFromArgsOrDummyLoad(HI.ContiguousIdx);
   llvm::Value *SGIdArg = GetFromArgsOrDummyLoad(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
 
   // Replace SGIdArg (and all its uses) with load from global variable (SgIdGlobalName)
@@ -2172,8 +2141,8 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
   formSubCfgGeneric(*NewF, NewLI, NewDT, NewPDT, SAA, state,
                     {llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize)},
                     llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize),
-                    {HierarchicalLevel::H_CBS_SUBGROUP, NewLocalSize, NewIndVars.back(), NewIndVar,
-                     SGIdArg, &ArgsToAlloca});
+                    {HierarchicalLevel::H_CBS_SUBGROUP, NewLocalSize, NewIndVars.back(), SGIdArg,
+                     &ArgsToAlloca});
 
   // The SgIdArg in NewF should not have any users.
   // They should have been replaced with the subgroup induction variable
@@ -2272,6 +2241,8 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
     Cfg.fixSingleSubCfgValues(DT, RemappedInstAllocaMap, ReqdArrayElements, VecInfo, LoadToAlloca);
   }
 
+  //assert(mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)->getNumUses() == 0);
+
   if (HI.Level == HierarchicalLevel::H_CBS_GROUP) {
     for (auto &Cfg : SubCFGs) {
       formSubgroupCfgs(Cfg, F, SAA, LocalSize, state, HI, SubCFGs, DT);
@@ -2330,11 +2301,6 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
 
   //auto x = mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
 
-  // The dummy induction variable can now be removed. It should not have any users.
-  {
-    assert(IndVar->getNumUses() == 0);
-    IndVar->eraseFromParent();
-  }
   assert(!llvm::verifyFunction(F, &llvm::errs()) && "Function verification failed");
 }
 
