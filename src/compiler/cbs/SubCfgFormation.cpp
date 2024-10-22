@@ -141,13 +141,17 @@ llvm::LoadInst *mergeGVLoadsInEntry(llvm::Function &F, llvm::StringRef VarName,
   }
 
   if (FirstLoad) {
-    FirstLoad->moveBefore(&F.getEntryBlock().front());
-    for (auto *LI : Loads) {
-      LI->replaceAllUsesWith(FirstLoad);
-      LI->eraseFromParent();
+    if (Loads.size() > 0 or FirstLoad->getParent() != &F.getEntryBlock()) {
+      FirstLoad->moveBefore(&F.getEntryBlock().front());
+      for (auto *LI : Loads) {
+        LI->replaceAllUsesWith(FirstLoad);
+        LI->eraseFromParent();
+      }
     }
     return FirstLoad;
   }
+
+  //llvm::outs() << "CREATE LOAD FOR: " << VarName << "\n";
 
   llvm::IRBuilder Builder{F.getEntryBlock().getTerminator()};
   auto *Load = Builder.CreateLoad(ty ? ty : SizeT, GV, "cbs.load." + GV->getName());
@@ -277,7 +281,7 @@ void replaceUsesOfGVWith(llvm::Function &F, llvm::StringRef GlobalVarName, llvm:
 llvm::SmallVector<llvm::Value *, 3> getLocalSizeValues(llvm::Function &F, const State &state) {
   llvm::SmallVector<llvm::Value *, 3> LocalSize(state.Dim);
   for (int I = 0; I < state.Dim; ++I) {
-    auto Load = getLoadForGlobalVariable(F, state.LocalSizeGlobalNames[I]);
+    auto Load = mergeGVLoadsInEntry(F, state.LocalSizeGlobalNames[I]);
     Load->moveBefore(F.getEntryBlock().getTerminator());
     LocalSize[I] = Load;
   }
@@ -394,7 +398,9 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 #if not USE_RV
     if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
       assert(D == InnerMost);
-      HI.WIContiguousIdx = Builder.CreateAdd(ContiguousIdx, HI.OuterIndex);
+     // llvm::outs() << "OUTERIDX: " << *HI.OuterIndex << "\n";
+      HI.WIContiguousIdx = Builder.CreateAdd(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), llvm::dyn_cast<llvm::Instruction>(HI.OuterIndex)->getOperand(0));
+      llvm::outs() << "WIContiguousIdx: " << *HI.WIContiguousIdx << "\n";
       auto *ContCond = Builder.CreateICmpULT(HI.WIContiguousIdx, HI.OuterLocalSize.back(),
                                              "exit.cont_cond." + Suffix);
 #if INCOMPLETE_SGS_OPT
@@ -416,6 +422,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     Latches[D]->getTerminator()->replaceSuccessorWith(AfterBB, Latches[D - 1]);
     IndVars[D]->replaceIncomingBlockWith(&F.getEntryBlock(), IndVars[D - 1]->getParent());
   }
+  VMap[AfterBB] = Latches[InnerMost];
 
   // Mark work-item loop as parallel
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
@@ -425,7 +432,6 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
         llvm::makePostTransformationMetadata(F.getContext(), nullptr, {}, {MDWorkItemLoop});
     Latches[InnerMost]->getTerminator()->setMetadata("llvm.loop", LoopID);
   }
-  VMap[AfterBB] = Latches[InnerMost];
 
   // add contiguous ind var calculation to load block
   Builder.SetInsertPoint(IndVars[InnerMost]->getParent(), ++IndVars[InnerMost]->getIterator());
@@ -446,8 +452,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
   Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
   if (HI.Level == HierarchicalLevel::CBS) {
     VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
-    VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Builder.CreateURem(
-        IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
+    VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Builder.CreateURem(IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
   } else if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     //assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Idx;
@@ -455,7 +460,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     assert(HI.Level == HierarchicalLevel::H_CBS_GROUP);
     // InnerMost induction variable + SgSize
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] =
-        Builder.CreateAdd(IndVars.back(), mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
+        Builder.CreateAdd( IndVars[InnerMost], mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     Idx = Builder.CreateAdd(Idx, mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] =
         Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
@@ -1004,11 +1009,14 @@ void SubCFG::loadUniformAndRecalcContValues(
   auto ContiguousIdx = HI.ContiguousIdx;
   llvm::Value *NewContIdx = VMap[ContiguousIdx];
   UniVMap[ContiguousIdx] = NewContIdx;
+  auto& F = *this->LoadBB_->getParent();
+  UniVMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)];
+  UniVMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)];
 
   // copy local id load value to univmap
   for (size_t D = 0; D < this->Dim; ++D) {
     auto *Load =
-        getLoadForGlobalVariable(*this->LoadBB_->getParent(), state.LocalIdGlobalNames[D]);
+        mergeGVLoadsInEntry(*this->LoadBB_->getParent(), state.LocalIdGlobalNames[D]);
     UniVMap[Load] = VMap[Load];
   }
 
@@ -2169,6 +2177,15 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
   // non-entry block Allocas are considered broken, move to entry.
   moveAllocasToEntry(F, Blocks);
   mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName);
+  mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
+
+  for (size_t D = 0; D < 3; ++D) {
+    mergeGVLoadsInEntry(F, cbs::LocalIdGlobalNames[D]);
+    mergeGVLoadsInEntry(F, cbs::LocalSizeGlobalNames[D]);
+    mergeGVLoadsInEntry(F, cbs::NumGroupsGlobalNames[D]);
+    mergeGVLoadsInEntry(F, cbs::GroupIdGlobalNames[D]);
+  }
+
 
   auto RImpl = getRegion(F, LI, Blocks);
   Region R{*RImpl};
@@ -2256,8 +2273,7 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
     Shift<false>{}.vectorizeAllInstances(F, SubCFGs);
     ShuffleIntrinsic{}.vectorizeAllInstances(F, SubCFGs);
     ExtractIntrinsic{}.vectorizeAllInstances(F, SubCFGs);
-    // F.viewCFG();
-    assert(!llvm::verifyFunction(F, &llvm::errs()));
+    assert(!llvm::verifyFunction(F, &llvm::outs()));
   }
 
   // simplify while loop to get single latch that isn't marked as wi-loop to prevent
@@ -2285,8 +2301,6 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
   if constexpr (USE_RV) {
     assert(not utils::hasSubBarriers(F, SAA));
   }
-
-  mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
 
   const auto HiLevel = ALWAYS_CREATE_SUBGROUP_SUB_CFGS ? HierarchicalLevel::H_CBS_GROUP : (utils::hasSubBarriers(F, SAA) ? HierarchicalLevel::H_CBS_GROUP : HierarchicalLevel::CBS);
 
@@ -2376,9 +2390,9 @@ void multiplyFunction(llvm::Function &F, State state) {
 
   {
     llvm::IRBuilder<> Builder{F.getEntryBlock().getFirstNonPHI()};
-    llvm::Value* LocalSize = getLoadForGlobalVariable(F, state.LocalSizeGlobalNames[0]);
+    llvm::Value* LocalSize = mergeGVLoadsInEntry(F, state.LocalSizeGlobalNames[0]);
     for (auto i = 1; i < state.Dim; ++i) {
-      LocalSize = Builder.CreateMul(LocalSize, getLoadForGlobalVariable(F, state.LocalSizeGlobalNames[i]));
+      LocalSize = Builder.CreateMul(LocalSize, mergeGVLoadsInEntry(F, state.LocalSizeGlobalNames[i]));
     }
     llvm::Value* Cond =  Builder.CreateURem(LocalSize, Builder.getInt64(SGSize));
     auto* CondNoIncompleteSgs = Builder.CreateICmpEQ(Cond, Builder.getInt64(0));
@@ -2491,6 +2505,7 @@ llvm::PreservedAnalyses SubCfgFormationPass::run(llvm::Function &F,
   }
   F.addFnAttr(llvm::Attribute::NoInline);
   assert(!llvm::verifyFunction(F, &llvm::outs()));
+
 
   llvm::PreservedAnalyses PA;
   PA.preserve<SplitterAnnotationAnalysis>();

@@ -98,13 +98,23 @@ template <typename T> T sub_broadcast(const int sender, T x) {
 #if USE_RV
   return hipsycl::sycl::detail::extract_impl<T>(x, sender);
 #else
+#if USE_CBS_SHUFFLE
   auto e = static_cast<uint64_t>(sender);
   __acpp_cbs_sub_barrier();
   auto t = __cbs_extract(x, e);
   __acpp_cbs_sub_barrier();
   return t;
+#else
+  T *scratch = static_cast<T *>(sub_group_shared_memory);
+  auto lid = __acpp_sscp_get_subgroup_local_id();
+  scratch[lid] = x;
+  __acpp_cbs_sub_barrier();
+  x = scratch[sender];
+  __acpp_cbs_sub_barrier();
+  return x;
+  #endif
 #endif
-}
+}//
 
 template <typename T> T sub_shift_left(T x, __acpp_uint32 delta) {
 #if USE_RV
