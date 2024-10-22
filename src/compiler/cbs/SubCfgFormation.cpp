@@ -922,6 +922,18 @@ void SubCFG::arrayifyMultiSubCfgValues(
         }
 #endif
 
+#ifndef HIPSYCL_NO_PHIS_IN_SPLIT
+        // if value is uniform, just store to 1-wide alloca
+        if (Shape.isUniform()) {
+          HIPSYCL_DEBUG_INFO << "[SubCFG] Value uniform, store to single element alloca " << I
+                             << "\n";
+          auto *Alloca = utils::arrayifyInstruction(AllocaIP, &I, ContiguousIdx, nullptr);
+          InstAllocaMap.insert({&I, Alloca});
+          VecInfo.setVectorShape(*Alloca, VectorShape::uni());
+          continue;
+        }
+#endif
+
         // create wide alloca and store the value
         auto *Alloca = utils::arrayifyInstruction(AllocaIP, &I, ContiguousIdx, ReqdArrayElements);
         InstAllocaMap.insert({&I, Alloca});
@@ -2182,7 +2194,6 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
   auto RImpl = getRegion(F, LI, Blocks);
   Region R{*RImpl};
   auto VecInfo = getVectorizationInfo(F, R, LI, DT, PDT, state.Dim, state, HI);
-  VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   llvm::SmallPtrSet<llvm::BasicBlock *, 2> ExitingBlocks;
   R.getEndingBlocks(ExitingBlocks);
@@ -2305,6 +2316,9 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
        {},
        IndVar,
        nullptr});
+
+
+  //auto x = mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
 
   // The dummy induction variable can now be removed. It should not have any users.
   {
