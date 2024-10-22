@@ -24,7 +24,7 @@ extern "C" size_t __acpp_cbs_local_id_z;
 extern "C" size_t __acpp_cbs_local_size_x;
 extern "C" size_t __acpp_cbs_local_size_y;
 extern "C" size_t __acpp_cbs_local_size_z;
-//
+
 // TODO CBS AND RV REDUCE MISSING OPS
 
 // TODO for scan no impls in header?
@@ -112,9 +112,9 @@ template <typename T> T sub_broadcast(const int sender, T x) {
   x = scratch[sender];
   __acpp_cbs_sub_barrier();
   return x;
-  #endif
 #endif
-}//
+#endif
+}
 
 template <typename T> T sub_shift_left(T x, __acpp_uint32 delta) {
 #if USE_RV

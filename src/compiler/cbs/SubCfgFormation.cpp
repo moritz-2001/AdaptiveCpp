@@ -81,7 +81,6 @@ struct HierarchicalSplitInfo {
   llvm::ArrayRef<llvm::Value *> OuterLocalSize;
   llvm::Value *OuterIndex;
   llvm::Value *ContiguousIdx;
-  // llvm::Value *SGIdArg;
   llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8> *ArgsToAloca;
   llvm::Value *WIContiguousIdx = nullptr;
 };
@@ -150,8 +149,6 @@ llvm::LoadInst *mergeGVLoadsInEntry(llvm::Function &F, llvm::StringRef VarName,
     }
     return FirstLoad;
   }
-
-  //llvm::outs() << "CREATE LOAD FOR: " << VarName << "\n";
 
   llvm::IRBuilder Builder{F.getEntryBlock().getTerminator()};
   auto *Load = Builder.CreateLoad(ty ? ty : SizeT, GV, "cbs.load." + GV->getName());
@@ -466,11 +463,9 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     llvm::ValueToValueMapTy VMap;
-    // Old Idx becomes new Idx
     VMap[HI.ContiguousIdx] = Idx;
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] = Idx;
     llvm::SmallVector<llvm::BasicBlock *> Blocks{Latches.begin(), Latches.end()};
-    //Blocks.push_back(LoadBB);
     llvm::remapInstructionsInBlocks(Blocks, VMap);
   }
 
@@ -713,13 +708,6 @@ void SubCFG::replicate(
                         loadToAlloca);
   loadUniformAndRecalcContValues(BaseInstAllocaMap, ContInstReplicaMap, PreHeader_, VMap,
                                  loadToAlloca, state);
-
-  // for (auto [key, value] : VMap) {
-  //   if (value == nullptr)
-  //     llvm::outs() << *key << "\n";
-  // }
-
-  //F.viewCFG();
 
   llvm::SmallVector<llvm::BasicBlock *, 8> BlocksToRemap{NewBlocks_.begin(), NewBlocks_.end()};
   llvm::remapInstructionsInBlocks(BlocksToRemap, VMap);
