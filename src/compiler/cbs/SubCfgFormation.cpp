@@ -329,7 +329,6 @@ VectorizationInfo getVectorizationInfo(llvm::Function &F, Region &R, llvm::LoopI
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[Dim - 1]),
                          VectorShape::cont());
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), VectorShape::cont());
-
   VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   VectorizationAnalysis VecAna{VecInfo, LI, DT, PDT};
@@ -426,7 +425,6 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     Latches[D]->getTerminator()->replaceSuccessorWith(AfterBB, Latches[D - 1]);
     IndVars[D]->replaceIncomingBlockWith(&F.getEntryBlock(), IndVars[D - 1]->getParent());
   }
-  VMap[AfterBB] = Latches[InnerMost];
 
   // Mark work-item loop as parallel
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
@@ -436,6 +434,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
         llvm::makePostTransformationMetadata(F.getContext(), nullptr, {}, {MDWorkItemLoop});
     Latches[InnerMost]->getTerminator()->setMetadata("llvm.loop", LoopID);
   }
+  VMap[AfterBB] = Latches[InnerMost];
 
   // add contiguous ind var calculation to load block
   Builder.SetInsertPoint(IndVars[InnerMost]->getParent(), ++IndVars[InnerMost]->getIterator());
@@ -452,47 +451,26 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[D])] = IndVars[D];
   }
 
+  Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
   if (HI.Level == HierarchicalLevel::CBS) {
-    Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Builder.CreateURem(
         IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
   } else if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     VMap[HI.SGIdArg] = Idx;
-    Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     auto StridedInner = llvm::cast<llvm::Instruction>(HI.OuterIndex)->getOperand(0);
     Idx = Builder.CreateAdd(Idx, StridedInner, "stride.inner.add.");
-  }
-
-  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_GROUP)
-    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
-
-  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP or HI.Level == HierarchicalLevel::CBS) {
-    VMap[ContiguousIdx] = Idx; // ContiguousIdx = idx + sg_id
-    ContiguousIdx = Idx;
   } else {
     assert(HI.Level == HierarchicalLevel::H_CBS_GROUP);
-    Builder.SetInsertPoint(LoadBB, LoadBB->getFirstInsertionPt());
     // InnerMost induction variable + SgSize
+    Idx = Builder.CreateAdd(Idx, mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), "contiguous_index");
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] =
-        Builder.CreateAdd(IndVars.back(), mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-    VMap[ContiguousIdx] = ContiguousIdx;
+        Builder.CreateAdd(IndVars[InnerMost], mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
+    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
   }
 
-  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
-    llvm::ValueToValueMapTy VMap;
-    // Old Idx becomes new Idx
-    VMap[HI.ContiguousIdx] = Idx;
-    VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] = Idx;
-    // VMap[HI.SGIdArg] = IndVars[0];
-    assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-    VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = IndVars[0];
-    llvm::SmallVector<llvm::BasicBlock *> Blocks{Latches.begin(), Latches.end()};
-    Blocks.push_back(LoadBB);
-    llvm::remapInstructionsInBlocks(Blocks, VMap);
-
-    //HI.SGIdArg = VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)];
-  }
+  VMap[ContiguousIdx] = Idx;
+  ContiguousIdx = Idx;
 }
 
 class SubCFG {
@@ -2204,6 +2182,7 @@ void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTre
   auto RImpl = getRegion(F, LI, Blocks);
   Region R{*RImpl};
   auto VecInfo = getVectorizationInfo(F, R, LI, DT, PDT, state.Dim, state, HI);
+  VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   llvm::SmallPtrSet<llvm::BasicBlock *, 2> ExitingBlocks;
   R.getEndingBlocks(ExitingBlocks);
@@ -2326,9 +2305,6 @@ void formSubCfgs(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
        {},
        IndVar,
        nullptr});
-
-
-  //auto x = mergeGVLoadsInEntry(F, cbs::SgIdGlobalName);
 
   // The dummy induction variable can now be removed. It should not have any users.
   {
