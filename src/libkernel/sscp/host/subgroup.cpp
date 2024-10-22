@@ -64,12 +64,13 @@ HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_max_size() {
 }
 
 HIPSYCL_SSCP_BUILTIN __acpp_uint32 __acpp_sscp_get_subgroup_id() {
-  const __acpp_uint32 local_tid = __acpp_sscp_get_local_id_x() +
+  const size_t local_tid = __acpp_sscp_get_local_id_x() +
                            __acpp_sscp_get_local_id_y() *
                                (__acpp_sscp_get_local_size_x() +
                                 __acpp_sscp_get_local_id_z() * __acpp_sscp_get_local_size_x());
 
-  const __acpp_uint32 res = local_tid / (__acpp_uint32) __acpp_sscp_get_subgroup_max_size();
+  const auto res = local_tid / __acpp_sscp_get_subgroup_max_size();
+
   #if USE_RV
     return rv_is_uniform(__hipsycl_cbs_id_subgroup);
   #else
