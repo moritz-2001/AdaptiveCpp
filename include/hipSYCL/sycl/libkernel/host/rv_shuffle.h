@@ -44,11 +44,11 @@ T apply_on_data(T x, const RvOperation& op) {
   } else if constexpr (sizeof(T) == 1) {
     return bit_cast<T>(op(bit_cast<uint8_t>(x)));
   } else {
-    constexpr std::size_t number_of_floats = (sizeof(T) + sizeof(float) - 1) / sizeof(float);
-    std::array<float, number_of_floats> words{};
+    constexpr std::size_t number_of_doubles = (sizeof(T) + sizeof(double) - 1) / sizeof(double);
+    std::array<double, number_of_doubles> words{};
     std::memcpy(&words, &x, sizeof(T));
 
-    for (auto i = 0ul; i < number_of_floats; ++i)
+    for (auto i = 0ul; i < number_of_doubles; ++i)
       words[i] = op(words[i]);
 
     T output;
