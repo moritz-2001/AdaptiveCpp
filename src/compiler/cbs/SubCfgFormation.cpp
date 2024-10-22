@@ -398,9 +398,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 #if not USE_RV
     if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
       assert(D == InnerMost);
-     // llvm::outs() << "OUTERIDX: " << *HI.OuterIndex << "\n";
       HI.WIContiguousIdx = Builder.CreateAdd(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), llvm::dyn_cast<llvm::Instruction>(HI.OuterIndex)->getOperand(0));
-      llvm::outs() << "WIContiguousIdx: " << *HI.WIContiguousIdx << "\n";
       auto *ContCond = Builder.CreateICmpULT(HI.WIContiguousIdx, HI.OuterLocalSize.back(),
                                              "exit.cont_cond." + Suffix);
 #if INCOMPLETE_SGS_OPT
@@ -716,6 +714,11 @@ void SubCFG::replicate(
   loadUniformAndRecalcContValues(BaseInstAllocaMap, ContInstReplicaMap, PreHeader_, VMap,
                                  loadToAlloca, state);
 
+  // for (auto [key, value] : VMap) {
+  //   if (value == nullptr)
+  //     llvm::outs() << *key << "\n";
+  // }
+
   //F.viewCFG();
 
   llvm::SmallVector<llvm::BasicBlock *, 8> BlocksToRemap{NewBlocks_.begin(), NewBlocks_.end()};
@@ -1010,8 +1013,12 @@ void SubCFG::loadUniformAndRecalcContValues(
   llvm::Value *NewContIdx = VMap[ContiguousIdx];
   UniVMap[ContiguousIdx] = NewContIdx;
   auto& F = *this->LoadBB_->getParent();
-  UniVMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)];
-  UniVMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)];
+  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
+    UniVMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)];
+  }
+  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_GROUP) {
+    UniVMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)];
+  }
 
   // copy local id load value to univmap
   for (size_t D = 0; D < this->Dim; ++D) {
