@@ -456,9 +456,9 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     // InnerMost induction variable + SgSize
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] =
         Builder.CreateAdd( IndVars[InnerMost], mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-    Idx = Builder.CreateAdd(Idx, mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] =
-        Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
+             Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
+    Idx = Builder.CreateAdd(Idx, mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
   }
 
   if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
