@@ -320,6 +320,9 @@ VectorizationInfo getVectorizationInfo(llvm::Function &F, Region &R, llvm::LoopI
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[Dim - 1]),
                          VectorShape::cont());
   VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), VectorShape::cont());
+  if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
+    VecInfo.setPinnedShape(*mergeGVLoadsInEntry(F, cbs::SgIdGlobalName), VectorShape::uni());
+  }
   VecInfo.setPinnedShape(*HI.ContiguousIdx, VectorShape::cont());
 
   VectorizationAnalysis VecAna{VecInfo, LI, DT, PDT};
@@ -395,7 +398,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 #if not USE_RV
     if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
       assert(D == InnerMost);
-      HI.WIContiguousIdx = Builder.CreateAdd(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName), llvm::dyn_cast<llvm::Instruction>(HI.OuterIndex)->getOperand(0));
+      HI.WIContiguousIdx = Builder.CreateAdd(WIIndVar, mergeGVLoadsInEntry(F, "__cont_idx_without_sg"));
       auto *ContCond = Builder.CreateICmpULT(HI.WIContiguousIdx, HI.OuterLocalSize.back(),
                                              "exit.cont_cond." + Suffix);
 #if INCOMPLETE_SGS_OPT
@@ -449,15 +452,13 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
     VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Builder.CreateURem(IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
   } else if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
-    //assert(HI.SGIdArg == mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
     VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Idx;
+    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(mergeGVLoadsInEntry(F, "__cont_idx_without_sg"), Builder.getInt64(SGSize));
   } else {
     assert(HI.Level == HierarchicalLevel::H_CBS_GROUP);
     // InnerMost induction variable + SgSize
     VMap[mergeGVLoadsInEntry(F, state.LocalIdGlobalNames[InnerMost])] =
         Builder.CreateAdd( IndVars[InnerMost], mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-    VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] =
-             Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
     Idx = Builder.CreateAdd(Idx, mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
   }
 
@@ -1003,8 +1004,6 @@ void SubCFG::loadUniformAndRecalcContValues(
   auto& F = *this->LoadBB_->getParent();
   if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
     UniVMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)];
-  }
-  if (HI.Level == HierarchicalLevel::CBS or HI.Level == HierarchicalLevel::H_CBS_GROUP) {
     UniVMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)];
   }
 
@@ -2002,6 +2001,8 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
   auto Blocks = Cfg.getNewBlocks(); // copy
   Blocks.insert(Blocks.begin(), Cfg.getLoadBB());
 
+  auto innerIdx = llvm::dyn_cast<llvm::Instruction>(Cfg.getHI().ContiguousIdx)->getOperand(0);
+
   assert(!llvm::verifyFunction(F, &llvm::outs()));
   llvm::SetVector<llvm::Value *> Inputs, Outputs;
   llvm::CodeExtractorAnalysisCache CEAC{F};
@@ -2126,6 +2127,7 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
   };
 
   llvm::Value *SGIdArg = GetFromArgsOrDummyLoad(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
+  llvm::Value *SGGroupIdArg = GetFromArgsOrDummyLoad(mergeGVLoadsInEntry(F, cbs::SgIdGlobalName));
 
   // Replace SGIdArg (and all its uses) with load from global variable (SgIdGlobalName)
   // This makes the handling of SgId simpler.
@@ -2139,6 +2141,7 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
         mergeGVLoadsInEntry(*NewF, cbs::SgLocalIdGlobalName, SGIdArg->getType()));
     SGIdArg = mergeGVLoadsInEntry(*NewF, cbs::SgLocalIdGlobalName);
     HIPSYCL_DEBUG_ERROR << "New SGIDArg: " << *SGIdArg << "\n";
+    SGGroupIdArg->replaceAllUsesWith(mergeGVLoadsInEntry(*NewF, cbs::SgIdGlobalName, SGGroupIdArg->getType()));
   }
 
   formSubCfgGeneric(*NewF, NewLI, NewDT, NewPDT, SAA, state,
@@ -2155,6 +2158,8 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
   assert(std::distance(NewF->user_begin(), NewF->user_end()) == 1);
   utils::checkedInlineFunction(llvm::cast<llvm::CallBase>(NewF->user_back()), "[SubCFG]");
   NewF->eraseFromParent();
+
+  replaceUsesOfGVWith(F, "__cont_idx_without_sg", innerIdx);
 }
 
 void formSubCfgGeneric(llvm::Function &F, llvm::LoopInfo &LI, llvm::DominatorTree &DT,
