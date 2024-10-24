@@ -78,8 +78,8 @@ enum class HierarchicalLevel {
 // Reference type only!
 struct HierarchicalSplitInfo {
   HierarchicalLevel Level;
-  llvm::ArrayRef<llvm::Value *> OuterLocalSize;
-  llvm::Value *OuterIndex;
+  llvm::Value * InnerSize;
+  llvm::Value *InnerInd;
   llvm::Value *ContiguousIdx;
   llvm::SmallDenseMap<llvm::Argument *, llvm::AllocaInst *, 8> *ArgsToAloca;
   llvm::Value *WIContiguousIdx = nullptr;
@@ -398,11 +398,12 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
 #if not USE_RV
     if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
       assert(D == InnerMost);
-      HI.WIContiguousIdx = Builder.CreateAdd(WIIndVar, mergeGVLoadsInEntry(F, "__cont_idx_without_sg"));
-      auto *ContCond = Builder.CreateICmpULT(HI.WIContiguousIdx, HI.OuterLocalSize.back(),
-                                             "exit.cont_cond." + Suffix);
+      auto *ContCond = Builder.CreateICmpULT(
+          Builder.CreateAdd(IncIndVar,
+                            llvm::dyn_cast<llvm::Instruction>(HI.InnerInd)->getOperand(0)),
+          HI.InnerSize, "exit.cont_cond." + Suffix);
 #if INCOMPLETE_SGS_OPT
-      auto* noIncompleteSgs = mergeGVLoadsInEntry(F, "no-incomplete-sgs", ContCond->getType());
+      auto *noIncompleteSgs = mergeGVLoadsInEntry(F, "no-incomplete-sgs", ContCond->getType());
       ContCond = Builder.CreateLogicalOr(noIncompleteSgs, ContCond);
 #endif
 
@@ -452,6 +453,7 @@ void createLoopsAround(llvm::Function &F, llvm::BasicBlock *AfterBB,
     VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(Idx, Builder.getInt64(SGSize));
     VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Builder.CreateURem(IndVars.back(), llvm::ConstantInt::get(IndVars.back()->getType(), SGSize));
   } else if (HI.Level == HierarchicalLevel::H_CBS_SUBGROUP) {
+    HI.WIContiguousIdx = Builder.CreateAdd(Idx, mergeGVLoadsInEntry(F, "__cont_idx_without_sg"));
     VMap[mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName)] = Idx;
     VMap[mergeGVLoadsInEntry(F, cbs::SgIdGlobalName)] = Builder.CreateUDiv(mergeGVLoadsInEntry(F, "__cont_idx_without_sg"), Builder.getInt64(SGSize));
   } else {
@@ -1582,7 +1584,7 @@ private:
       }
       auto* SGIterationsLeft = [&]() {
         auto* Idx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().WIContiguousIdx)->getOperand(1);
-        auto* Size = SubCfg.getHI().OuterLocalSize.back();
+        auto* Size = SubCfg.getHI().InnerSize;
         auto* GlobalIterationsLeft = Builder.CreateSub(Size, Idx);
         auto* lessThanSgSize = Builder.CreateICmpULT(GlobalIterationsLeft, Builder.getInt64(SGSize));
         return Builder.CreateSelect(lessThanSgSize, GlobalIterationsLeft, Builder.getInt64(SGSize));
@@ -1604,7 +1606,7 @@ private:
         auto* Idx = llvm::dyn_cast<llvm::Instruction>(SubCfg.getHI().WIContiguousIdx)->getOperand(1);
         auto* splat = Builder.CreateVectorSplat(llvm::ElementCount::getFixed(SGSize), Idx);
         auto* sAdd = Builder.CreateAdd(splat, Add);
-        return Builder.CreateICmpULT(sAdd, Builder.CreateVectorSplat(llvm::ElementCount::getFixed(SGSize), SubCfg.getHI().OuterLocalSize.back()));
+        return Builder.CreateICmpULT(sAdd, Builder.CreateVectorSplat(llvm::ElementCount::getFixed(SGSize), SubCfg.getHI().InnerSize));
       }();
 
       auto *VLoad = Builder.CreateMaskedLoad(VType, Storage, llvm::Align(), Mask, neutralElement(VType,Builder, Intrinsic));
@@ -2079,89 +2081,38 @@ void formSubgroupCfgs(SubCFG &Cfg, llvm::Function &F, const SplitterAnnotationIn
   llvm::PostDominatorTree NewPDT{*NewF};
   llvm::LoopInfo NewLI{NewDT};
 
-  // Because we now work on a new function we can not directly access the old induction variables
-  // or local sizes. These values are now either function arguments or do not exists at all
-  // (because they are not used in the new function).
-  // Thus, we now replace them with the fuction arguments or load them from their respective
-  // global variables.
-  llvm::SmallVector<llvm::Value *, 3> NewIndVars;
-  llvm::SmallVector<llvm::Value *, 3> NewLocalSize;
-  {
-    std::transform(Cfg.getWIIndVars().begin(), Cfg.getWIIndVars().end(),
-                   std::back_inserter(NewIndVars),
-                   [&InAndOutToArgs, &state, NewF, D = 0](llvm::Value *V) mutable -> llvm::Value * {
-                     D++;
-                     HIPSYCL_DEBUG_ERROR << "index mapping: " << *V << "\n";
-                     if (auto I = llvm::dyn_cast<llvm::Instruction>(V);
-                         I && I->getParent()->getParent() == NewF) {
-                       HIPSYCL_DEBUG_ERROR << " meself --> " << *I << "\n";
-                       return I;
-                     }
-                     if (const auto It = InAndOutToArgs.find(V); It != InAndOutToArgs.end()) {
-                       HIPSYCL_DEBUG_ERROR << " --> " << *It->second << "\n";
-                       return It->second;
-                     }
-                     HIPSYCL_DEBUG_ERROR
-                         << "meh --> "
-                         << *mergeGVLoadsInEntry(*NewF, state.LocalIdGlobalNames[D - 1])
-                         << "\n";
 
-                     return mergeGVLoadsInEntry(*NewF, state.LocalIdGlobalNames[D - 1]);
-                   });
-
-    std::transform(LocalSize.begin(), LocalSize.end(), std::back_inserter(NewLocalSize),
-                   [&InAndOutToArgs, NewF, &state, D = 0](llvm::Value *V) mutable -> llvm::Value * {
-                     HIPSYCL_DEBUG_ERROR << "LocalSize get from vmap: " << *V << "\n";
-                     ++D;
-                     if (auto It = InAndOutToArgs.find(V); It != InAndOutToArgs.end()) {
-                       HIPSYCL_DEBUG_INFO << " --> VMapped : " << *It->second << "\n";
-                       return It->second;
-                     }
-                     HIPSYCL_DEBUG_ERROR << " --> load from global: " << *V << "\n";
-                     return mergeGVLoadsInEntry(*NewF, state.LocalSizeGlobalNames[D - 1],
-                                                V->getType());
-                   });
-  }
-
-  auto GetFromArgsOrDummyLoad = [&InAndOutToArgs, NewF](llvm::Value *V) -> llvm::Value * {
-    HIPSYCL_DEBUG_ERROR << "get from vmap: " << *V << "\n";
-    if (auto It = InAndOutToArgs.find(V); It != InAndOutToArgs.end()) {
-      HIPSYCL_DEBUG_ERROR << " --> VMapped : " << *It->second << "\n";
-      return It->second;
+  llvm::Value *InnerSize = [&]() -> llvm::Value* {
+    if (auto it = InAndOutToArgs.find(LocalSize.back()); it != InAndOutToArgs.end()) {
+      return it->second;
     }
-    HIPSYCL_DEBUG_ERROR << " --> load from undef ptr: " << *V << "\n";
-    return llvm::IRBuilder{NewF->getEntryBlock().getFirstNonPHI()}.CreateLoad(
-        V->getType(), llvm::UndefValue::get(llvm::PointerType::get(V->getType(), 0)));
+    return mergeGVLoadsInEntry(*NewF, state.LocalSizeGlobalNames[LocalSize.size() - 1],
+                               LocalSize.back()->getType());
+  }();
+
+  auto replaceInNewF = [&](const std::string& globalVarName) -> llvm::Value * {
+    auto* V = mergeGVLoadsInEntry(F, globalVarName);
+    llvm::Value* VinNewF = mergeGVLoadsInEntry(*NewF, globalVarName, V->getType());
+    if (auto It = InAndOutToArgs.find(V); It != InAndOutToArgs.end()) {
+      It->second->replaceAllUsesWith(VinNewF);
+    }
+    return VinNewF;
   };
 
-  llvm::Value *SGIdArg = GetFromArgsOrDummyLoad(mergeGVLoadsInEntry(F, cbs::SgLocalIdGlobalName));
-  llvm::Value *SGGroupIdArg = GetFromArgsOrDummyLoad(mergeGVLoadsInEntry(F, cbs::SgIdGlobalName));
-
-  // Replace SGIdArg (and all its uses) with load from global variable (SgIdGlobalName)
-  // This makes the handling of SgId simpler.
-  // (SGIdArg could be an argument)
-  {
-    HIPSYCL_DEBUG_ERROR << "SGIDArg: " << *SGIdArg << "\n";
-    for (auto U : SGIdArg->users()) {
-      HIPSYCL_DEBUG_ERROR << "SGIDArg user: " << *U << "\n";
-    }
-    SGIdArg->replaceAllUsesWith(
-        mergeGVLoadsInEntry(*NewF, cbs::SgLocalIdGlobalName, SGIdArg->getType()));
-    SGIdArg = mergeGVLoadsInEntry(*NewF, cbs::SgLocalIdGlobalName);
-    HIPSYCL_DEBUG_ERROR << "New SGIDArg: " << *SGIdArg << "\n";
-    SGGroupIdArg->replaceAllUsesWith(mergeGVLoadsInEntry(*NewF, cbs::SgIdGlobalName, SGGroupIdArg->getType()));
-  }
+  llvm::Value *SGIdArg = replaceInNewF(cbs::SgLocalIdGlobalName);
+  llvm::Value *SGGroupIdArg = replaceInNewF(cbs::SgIdGlobalName);
 
   formSubCfgGeneric(*NewF, NewLI, NewDT, NewPDT, SAA, state,
                     {llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize)},
                     llvm::ConstantInt::get(LocalSize[0]->getType(), SGSize),
-                    {HierarchicalLevel::H_CBS_SUBGROUP, NewLocalSize, NewIndVars.back(), SGIdArg,
-                     &ArgsToAlloca});
+                    {HierarchicalLevel::H_CBS_SUBGROUP, InnerSize, Cfg.getWIIndVars().back(),
+                     SGIdArg, &ArgsToAlloca});
 
   // The SgIdArg in NewF should not have any users.
   // They should have been replaced with the subgroup induction variable
   // NewF->viewCFG();
   assert(SGIdArg->getNumUses() == 0);
+  assert(SGGroupIdArg->getNumUses() == 0);
 
   assert(std::distance(NewF->user_begin(), NewF->user_end()) == 1);
   utils::checkedInlineFunction(llvm::cast<llvm::CallBase>(NewF->user_back()), "[SubCFG]");
