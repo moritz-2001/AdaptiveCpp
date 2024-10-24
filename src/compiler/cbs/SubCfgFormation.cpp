@@ -586,8 +586,12 @@ SubCFG::createExitWithID(llvm::detail::DenseMapPair<llvm::BasicBlock *, size_t> 
 
   auto &DL = Exit->getParent()->getParent()->getDataLayout();
   llvm::IRBuilder Builder{Exit, Exit->getFirstInsertionPt()};
-  Builder.CreateStore(Builder.getIntN(DL.getLargestLegalIntTypeSizeInBits(), BarrierPair.second),
+  auto& F = *After->getParent()->getParent();
+  auto *MDAlloca = llvm::MDNode::get(
+      F.getContext(), {llvm::MDString::get(F.getContext(), MDKind::LoopState)});
+  auto Store = Builder.CreateStore(Builder.getIntN(DL.getLargestLegalIntTypeSizeInBits(), BarrierPair.second),
                       LastBarrierIdStorage_);
+  Store->setMetadata(MDKind::Arrayified, MDAlloca);
   Builder.CreateBr(TargetBB);
 
   After->getTerminator()->replaceSuccessorWith(BarrierPair.first, Exit);
@@ -901,7 +905,7 @@ void SubCFG::arrayifyMultiSubCfgValues(
         if (Shape.isContiguousOrStrided() or isTrivialStepAway(I, cbs::SgIdGlobalName) or isTrivialStepAway(I, cbs::SgLocalIdGlobalName)) {
           if (dontArrayifyValues(I, BaseInstAllocaMap, ContInstReplicaMap, AllocaIP,
                                  ReqdArrayElements, ContiguousIdx, VecInfo)) {
-            llvm::outs() << "[SubCFG] Not arrayifying " << I << "\n";
+            HIPSYCL_DEBUG_INFO << "[SubCFG] Not arrayifying " << I << "\n";
             continue;
           }
         }
@@ -1274,9 +1278,13 @@ llvm::BasicBlock *generateWhileSwitchAround(llvm::BasicBlock *PreHeader, llvm::B
   Switch->addCase(Builder.getIntN(DL.getLargestLegalIntTypeSizeInBits(), ExitBarrierId), Exit);
 
   Builder.SetInsertPoint(PreHeader->getTerminator());
-  Builder.CreateStore(
+  auto *MDAlloca = llvm::MDNode::get(
+      F.getContext(), {llvm::MDString::get(F.getContext(), MDKind::LoopState)});
+  auto* Store = Builder.CreateStore(
       llvm::ConstantInt::get(LastBarrierIdStorage->getAllocatedType(), EntryBarrierId),
       LastBarrierIdStorage);
+  Store->setMetadata(MDKind::Arrayified, MDAlloca);
+
   PreHeader->getTerminator()->replaceSuccessorWith(OldEntry, WhileHeader);
   return WhileHeader;
 }

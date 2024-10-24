@@ -33,6 +33,7 @@
 
 #include "hipSYCL/common/debug.hpp"
 
+#include <hipSYCL/RV.h>
 #include <llvm/Analysis/TargetTransformInfo.h>
 #include <llvm/IR/Dominators.h>
 
@@ -41,12 +42,23 @@ using namespace hipsycl::compiler;
 void markLoopParallel(llvm::Function &F, llvm::Loop *L) {
   // LLVM < 12.0.1 might miscompile if conditionals in "parallel" loop (https://llvm.org/PR46666)
 
+  /*
+ With H-CBS (and CBS) we do not arrayify Sub-CFG internal allocas, even if they are varying. Thus,
+ we can not tell LLVM that accesses to these allocas are loop independent. One solution would be to
+ always arrayify these allocas. However, in my opinion and after some benchmarks, the better
+ solution is to let LLVM handle arrayification or let them scalarized in case llvm does not
+ vectorize.
+ */
+
+
   // Mark memory accesses with access group
   auto *MDAccessGroup = llvm::MDNode::getDistinct(F.getContext(), {});
   for (auto *BB : L->blocks()) {
     for (auto &I : *BB) {
       if (I.mayReadOrWriteMemory() && !I.hasMetadata(llvm::LLVMContext::MD_access_group)) {
-        utils::addAccessGroupMD(&I, MDAccessGroup);
+        if (auto *MDArrayified = I.getMetadata(MDKind::Arrayified); MDArrayified or USE_RV) {
+          utils::addAccessGroupMD(&I, MDAccessGroup);
+        }
       }
     }
   }
