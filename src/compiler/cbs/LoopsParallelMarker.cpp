@@ -41,6 +41,11 @@ using namespace hipsycl::compiler;
 void markLoopParallel(llvm::Function &F, llvm::Loop *L) {
   // LLVM < 12.0.1 might miscompile if conditionals in "parallel" loop (https://llvm.org/PR46666)
 
+  if (llvm::findOptionMDForLoop(L, hipsycl::compiler::MDKind::AllocaProblem)) {
+    llvm::outs() << "ALLOCA PROBLEM. NOT marking loop as parallel\n";
+    return;
+  }
+
   // Mark memory accesses with access group
   auto *MDAccessGroup = llvm::MDNode::getDistinct(F.getContext(), {});
   for (auto *BB : L->blocks()) {
