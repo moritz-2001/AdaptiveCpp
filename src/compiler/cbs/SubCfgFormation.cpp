@@ -1185,18 +1185,19 @@ void arrayifyAllocas(llvm::BasicBlock *EntryBlock, llvm::DominatorTree &DT,
       if (auto shape = VecInfo.getVectorShape(*Alloca); shape.isUniform()) {
         continue;
       }
-      if (auto SubCfg = isAllocaSubCfgInternal(Alloca, SubCfgs, DT))
+      if (auto SubCfg = isAllocaSubCfgInternal(Alloca, SubCfgs, DT)) {
         if (*SubCfg) {
           auto *MDWorkItemLoop = llvm::MDNode::get(
-                    F.getContext(), {llvm::MDString::get(F.getContext(), MDKind::WorkItemLoop)});
+              F.getContext(), {llvm::MDString::get(F.getContext(), MDKind::WorkItemLoop)});
           auto *MDAllocaProblem = llvm::MDNode::get(
               F.getContext(), {llvm::MDString::get(F.getContext(), MDKind::AllocaProblem)});
           auto *LoopId = llvm::makePostTransformationMetadata(F.getContext(), nullptr, {},
                                                               {MDWorkItemLoop, MDAllocaProblem});
           (*SubCfg)->WILoopLatch->getTerminator()->setMetadata("llvm.loop", LoopId);
         }
-    } else {
-      WL.push_back(Alloca);
+      } else {
+        WL.push_back(Alloca);
+      }
     }
   }
 
